@@ -5,6 +5,8 @@ import { OnboardingForm } from "@/components/auth/onboarding-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Profile } from "@/lib/supabase/types";
 
+export const instant = false;
+
 export default async function OnboardingPage() {
   const supabase = await createClient();
 

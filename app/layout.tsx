@@ -25,6 +25,7 @@ export const metadata: Metadata = {
 
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

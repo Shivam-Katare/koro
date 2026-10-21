@@ -88,3 +88,15 @@ export function DialogDescription({
     />
   );
 }
+
+export function DialogFooter({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn("flex items-center justify-end gap-2", className)}
+      {...props}
+    />
+  );
+}

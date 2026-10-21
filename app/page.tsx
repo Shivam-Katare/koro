@@ -3,6 +3,8 @@ import { HeroNavbar } from "@/components/landing/hero-navbar";
 import { HeroHeader } from "@/components/landing/hero-header";
 import { HeroShowcase } from "@/components/landing/hero-showcase";
 
+export const instant = false;
+
 export default async function Home({
   searchParams,
 }: {
