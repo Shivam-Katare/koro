@@ -3,6 +3,7 @@
 import { InventoryStats } from "@/components/inventory/inventory-stats";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { AddProductDialog } from "@/components/inventory/add-product-dialog";
+import { AssistantVoiceCard } from "@/components/assistant/assistant-voice-card";
 import { Button } from "@/components/ui/button";
 import { PlusCircle, PackageSearch, Sparkles } from "lucide-react";
 import type { Shop, Profile, Product } from "@/lib/supabase/types";
@@ -38,7 +39,7 @@ export function HomeView({ shop, profile, products }: HomeViewProps) {
                 shopId={shop.id}
                 defaultCategory={shop.category}
                 trigger={
-                  <Button className="h-11 px-5 font-semibold gap-2 shadow-sm">
+                  <Button className="h-11 px-5 font-semibold gap-2 shadow-sm cursor-pointer">
                     <PlusCircle className="h-4 w-4" />
                     <span>Add Your First Product</span>
                   </Button>
@@ -47,6 +48,9 @@ export function HomeView({ shop, profile, products }: HomeViewProps) {
             )}
           </div>
         </div>
+
+        {/* Voice Assistant even in empty state */}
+        <AssistantVoiceCard shop={shop} products={products} />
 
         <div className="rounded-2xl border border-dashed border-border p-8 text-center space-y-3 bg-muted/10">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -71,6 +75,9 @@ export function HomeView({ shop, profile, products }: HomeViewProps) {
           Quick summary of your store inventory and item counts.
         </p>
       </div>
+
+      {/* Voice-First Assistant Card on Home Page */}
+      <AssistantVoiceCard shop={shop} products={products} />
 
       <InventoryStats products={products} />
 
