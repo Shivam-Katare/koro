@@ -5,32 +5,20 @@ import { useRouter } from "next/navigation";
 import { useRestockStore } from "@/lib/store/use-restock-store";
 import { buildWhatsAppRestockMessage } from "@/lib/utils/restock-formatters";
 import { createRestockOrderAction } from "@/lib/actions/restock-actions";
-import type { Shop } from "@/lib/supabase/types";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  MessageSquareShare,
-  ClipboardCopy,
-  PackageCheck,
-  Trash2,
-  Minus,
-  Plus,
-  ShoppingCart,
-  RotateCcw,
-  CheckCheck,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import type { Shop, Product } from "@/lib/supabase/types";
+import { KoroFace } from "@/components/brand/koro-face";
+import { ReceiptPaper, ReceiptDivider } from "./receipt-paper";
 import { RestockAddTrendingDialog } from "./restock-add-trending-dialog";
-import type { Product } from "@/lib/supabase/types";
+import { MessageSquareShare, ClipboardCopy, Trash2, Minus, Plus, RotateCcw, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface RestockPurchaseListProps {
   shop: Shop | null;
   onProductAdded?: (product: Product) => void;
 }
+
+const fieldClass =
+  "h-11 w-full rounded-xl border border-input bg-background px-3.5 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60";
 
 export function RestockPurchaseList({ shop, onProductAdded }: RestockPurchaseListProps) {
   const router = useRouter();
@@ -43,7 +31,6 @@ export function RestockPurchaseList({ shop, onProductAdded }: RestockPurchaseLis
   const setQuantity = useRestockStore((s) => s.setQuantity);
   const removeProduct = useRestockStore((s) => s.removeProduct);
   const clearOrder = useRestockStore((s) => s.clearOrder);
-  const openArrivalDialog = useRestockStore((s) => s.openArrivalDialog);
 
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -142,283 +129,20 @@ export function RestockPurchaseList({ shop, onProductAdded }: RestockPurchaseLis
     }
   };
 
-  const handleCopyOnly = async () => {
-    if (items.length === 0) return;
+  const addNewItemButton = (
+    <button
+      type="button"
+      onClick={() => setIsAddTrendingOpen(true)}
+      disabled={isProcessing}
+      title="Order a new or trending item that is not in your list yet"
+      className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-full bg-secondary px-4 text-base font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+    >
+      <Plus className="h-5 w-5" />
+      <span>New item</span>
+    </button>
+  );
 
-    setIsProcessing(true);
-    const order = await saveOrderToSlip("copy_clipboard");
-    setIsProcessing(false);
-
-    if (!order) return;
-
-    const message = buildWhatsAppRestockMessage({
-      shopName: shop?.name || "My Store",
-      items,
-      distributorName,
-      notes,
-    });
-
-    try {
-      await navigator.clipboard.writeText(message);
-      toast.success(
-        `Slip #${order.order_number} recorded via Clipboard! Record Arrival button is attached to item rows.`
-      );
-      router.refresh();
-    } catch {
-      toast.error("Could not copy order to clipboard");
-    }
-  };
-
-  const handleMarkSent = async () => {
-    if (items.length === 0) return;
-
-    setIsProcessing(true);
-    const order = await saveOrderToSlip("manual");
-    setIsProcessing(false);
-
-    if (!order) return;
-
-    clearOrder();
-    toast.success(
-      `Slip #${order.order_number} saved & marked as sent! Linked to item rows.`
-    );
-    router.refresh();
-  };
-
-  if (items.length === 0) {
-    return (
-      <>
-        <Card className="border-border shadow-xs">
-          <CardHeader className="pb-3 border-b border-border">
-            <CardTitle className="text-base font-heading font-bold flex items-center justify-between">
-              <span>Purchase List</span>
-              <span className="text-xs font-normal text-muted-foreground">0 items</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-8 text-center space-y-3">
-            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto text-muted-foreground">
-              <ShoppingCart className="h-6 w-6" />
-            </div>
-            <p className="text-sm font-semibold text-foreground">Purchase List is Empty</p>
-            <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-              Select products from the depleted list on the left or add a new trending market item directly.
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsAddTrendingOpen(true)}
-              className="h-8 text-xs font-semibold gap-1.5 border-dashed border-primary/40 text-primary hover:bg-primary/5 cursor-pointer mt-1"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              <span>+ Order New / Trending Item</span>
-            </Button>
-          </CardContent>
-        </Card>
-
-        <RestockAddTrendingDialog
-          shopId={shop?.id || null}
-          shopCategory={shop?.category}
-          open={isAddTrendingOpen}
-          onOpenChange={setIsAddTrendingOpen}
-          onItemAdded={onProductAdded}
-        />
-      </>
-    );
-  }
-
-  return (
-    <>
-      <Card className="border-border shadow-xs flex flex-col">
-        <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between space-y-0">
-          <div>
-            <CardTitle className="text-base font-heading font-bold">Purchase List</CardTitle>
-            <p className="text-[11px] text-muted-foreground">
-              {items.length} product{items.length > 1 ? "s" : ""} • {totalUnits} total units
-            </p>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => setIsAddTrendingOpen(true)}
-              disabled={isProcessing}
-              className="text-xs text-primary hover:text-primary hover:bg-primary/10 gap-1 cursor-pointer font-medium"
-              title="Add a new or trending item to this order slip"
-            >
-              <Sparkles className="h-3 w-3" />
-              <span>+ Add Item</span>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={clearOrder}
-              disabled={isProcessing}
-              className="text-xs text-muted-foreground hover:text-destructive gap-1 cursor-pointer"
-            >
-              <RotateCcw className="h-3 w-3" />
-              <span>Clear</span>
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-4 space-y-4 flex-1">
-          <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-            {items.map(({ product, quantity }) => (
-              <div
-                key={product.id}
-                className="p-2.5 rounded-lg border border-border bg-muted/20 flex items-center justify-between gap-2 text-xs"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="font-semibold text-foreground truncate">{product.name}</p>
-                    {product.current_stock === 0 &&
-                      (product.description?.toLowerCase().includes("trending") ||
-                        product.description?.toLowerCase().includes("restock")) && (
-                        <Badge
-                          variant="outline"
-                          className="text-[9px] py-0 px-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold gap-0.5 shrink-0"
-                        >
-                          <Sparkles className="h-2 w-2" />
-                          New
-                        </Badge>
-                      )}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    In stock: {product.current_stock} • Min: {product.min_stock_threshold ?? 5}
-                  </p>
-                </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                <div className="flex items-center border border-border rounded-md bg-background overflow-hidden h-7">
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(product.id, quantity - 1)}
-                    disabled={quantity <= 1 || isProcessing}
-                    className="px-1.5 h-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30"
-                  >
-                    <Minus className="h-2.5 w-2.5" />
-                  </button>
-                  <span className="w-8 text-center text-xs font-semibold">{quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(product.id, quantity + 1)}
-                    disabled={isProcessing}
-                    className="px-1.5 h-full text-muted-foreground hover:text-foreground hover:bg-muted"
-                  >
-                    <Plus className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => removeProduct(product.id)}
-                  disabled={isProcessing}
-                  className="text-muted-foreground hover:text-destructive cursor-pointer"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-2 pt-2 border-t border-border">
-          <Input
-            placeholder="Distributor / Supplier Name (Optional)"
-            value={distributorName}
-            onChange={(e) => setDistributorName(e.target.value)}
-            disabled={isProcessing}
-            className="h-8 text-xs"
-          />
-          <Input
-            placeholder="Order Notes (e.g. Deliver before Friday)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            disabled={isProcessing}
-            className="h-8 text-xs"
-          />
-        </div>
-      </CardContent>
-
-      <CardFooter className="p-4 border-t border-border flex flex-col gap-2.5 bg-muted/10">
-        <Button
-          type="button"
-          onClick={handleShareWhatsApp}
-          disabled={isProcessing}
-          className="w-full bg-[#25D366] hover:bg-[#20ba59] text-white font-bold h-10 shadow-xs gap-2 cursor-pointer"
-        >
-          {isProcessing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <MessageSquareShare className="h-4 w-4" />
-          )}
-          <span>Share on WhatsApp</span>
-        </Button>
-
-        {/* Clear & Save Slip Actions */}
-        <div className="grid grid-cols-2 gap-2 w-full">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleCopyAndClear}
-            disabled={isProcessing}
-            className="h-8 text-xs gap-1.5 font-medium cursor-pointer"
-            title="Save order slip, copy message to clipboard, and clear draft"
-          >
-            <ClipboardCopy className="h-3.5 w-3.5 text-primary" />
-            <span>Copy &amp; Clear</span>
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleMarkSent}
-            disabled={isProcessing}
-            className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer"
-            title="Save slip as sent order and clear draft"
-          >
-            <CheckCheck className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Sent? Clear Draft</span>
-          </Button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 w-full pt-1 border-t border-border/40">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleCopyOnly}
-            disabled={isProcessing}
-            className="h-7 text-[11px] text-muted-foreground gap-1 cursor-pointer"
-            title="Copy order and save slip without clearing draft list"
-          >
-            <ClipboardCopy className="h-3 w-3" />
-            <span>Copy Only</span>
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={openArrivalDialog}
-            disabled={isProcessing}
-            className="h-7 text-[11px] gap-1 font-medium text-primary cursor-pointer"
-            title="Update inventory immediately if distributor is delivering now"
-          >
-            <PackageCheck className="h-3 w-3" />
-            <span>Record Arrival</span>
-          </Button>
-        </div>
-      </CardFooter>
-    </Card>
-
+  const addDialog = (
     <RestockAddTrendingDialog
       shopId={shop?.id || null}
       shopCategory={shop?.category}
@@ -426,6 +150,182 @@ export function RestockPurchaseList({ shop, onProductAdded }: RestockPurchaseLis
       onOpenChange={setIsAddTrendingOpen}
       onItemAdded={onProductAdded}
     />
-  </>
+  );
+
+  if (items.length === 0) {
+    return (
+      <>
+        <ReceiptPaper>
+          <div className="flex items-center justify-between gap-3 p-5">
+            <h3 className="font-heading text-xl font-bold text-foreground">Your order</h3>
+            <span className="text-base text-muted-foreground">0 items</span>
+          </div>
+          <ReceiptDivider />
+          <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
+            <KoroFace size={64} tone="sky" />
+            <div className="space-y-1">
+              <p className="text-lg font-semibold text-foreground">Nothing in your order yet</p>
+              <p className="mx-auto max-w-xs text-base text-muted-foreground">
+                Tap Add to order on an item, or add a new one.
+              </p>
+            </div>
+            {addNewItemButton}
+          </div>
+        </ReceiptPaper>
+        {addDialog}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ReceiptPaper>
+        {/* Receipt header */}
+        <div className="flex items-start justify-between gap-3 p-5">
+          <div>
+            <h3 className="font-heading text-xl font-bold text-foreground">Your order</h3>
+            <p className="mt-0.5 text-base text-muted-foreground">
+              {items.length} item{items.length > 1 ? "s" : ""}, {totalUnits} units
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={clearOrder}
+            disabled={isProcessing}
+            title="Remove everything from this order"
+            className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-full px-3 text-base font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+          >
+            <RotateCcw className="h-4 w-4" />
+            <span>Clear</span>
+          </button>
+        </div>
+
+        <ReceiptDivider />
+
+        {/* Line items */}
+        <ul className="no-scrollbar max-h-[340px] space-y-1 overflow-y-auto px-3 py-3">
+          {items.map(({ product, quantity }) => {
+            const isNewItem =
+              product.current_stock === 0 &&
+              (product.description?.toLowerCase().includes("trending") ||
+                product.description?.toLowerCase().includes("restock"));
+
+            return (
+              <li key={product.id} className="flex items-center justify-between gap-3 rounded-2xl px-2 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-base font-semibold text-foreground">{product.name}</p>
+                    {isNewItem && (
+                      <span className="shrink-0 rounded-full bg-[#fff1cc] px-2.5 py-0.5 text-sm font-semibold text-amber-800 dark:bg-[#3a2f12] dark:text-amber-300">
+                        New
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    In stock {product.current_stock}, reorder at {product.min_stock_threshold ?? 5}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <div className="flex h-10 items-center rounded-full bg-secondary">
+                    <button
+                      type="button"
+                      onClick={() => setQuantity(product.id, quantity - 1)}
+                      disabled={quantity <= 1 || isProcessing}
+                      aria-label="Decrease quantity"
+                      className="flex h-10 w-9 cursor-pointer items-center justify-center rounded-l-full text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="w-8 text-center text-base font-bold tabular-nums text-foreground">{quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => setQuantity(product.id, quantity + 1)}
+                      disabled={isProcessing}
+                      aria-label="Increase quantity"
+                      className="flex h-10 w-9 cursor-pointer items-center justify-center rounded-r-full text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removeProduct(product.id)}
+                    disabled={isProcessing}
+                    aria-label={`Remove ${product.name}`}
+                    title="Remove"
+                    className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="flex items-center justify-between px-5 pb-4">
+          {addNewItemButton}
+          <p className="text-base text-muted-foreground">
+            Total <span className="text-xl font-bold tabular-nums text-foreground">{totalUnits}</span> units
+          </p>
+        </div>
+
+        <ReceiptDivider />
+
+        {/* Optional details */}
+        <div className="space-y-3 p-5">
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">Supplier (optional)</span>
+            <input
+              placeholder="Distributor name"
+              value={distributorName}
+              onChange={(e) => setDistributorName(e.target.value)}
+              disabled={isProcessing}
+              className={fieldClass}
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">Note (optional)</span>
+            <input
+              placeholder="e.g. Deliver before Friday"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              disabled={isProcessing}
+              className={fieldClass}
+            />
+          </label>
+        </div>
+
+        <ReceiptDivider />
+
+        {/* The only two actions */}
+        <div className="space-y-2.5 p-5">
+          <button
+            type="button"
+            onClick={handleShareWhatsApp}
+            disabled={isProcessing}
+            className="inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#25D366] text-base font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.99] disabled:opacity-60"
+          >
+            {isProcessing ? <Loader2 className="h-5 w-5 animate-spin" /> : <MessageSquareShare className="h-5 w-5" />}
+            <span>Share on WhatsApp</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCopyAndClear}
+            disabled={isProcessing}
+            title="Save the slip, copy the message, and start a fresh order"
+            className="inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-muted text-base font-semibold text-foreground transition-colors hover:bg-secondary hover:text-primary disabled:opacity-60"
+          >
+            <ClipboardCopy className="h-5 w-5" />
+            <span>Copy and clear</span>
+          </button>
+        </div>
+      </ReceiptPaper>
+
+      {addDialog}
+    </>
   );
 }

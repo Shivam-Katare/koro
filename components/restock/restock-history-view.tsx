@@ -2,10 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -19,37 +16,42 @@ import {
   cancelRestockOrderAction,
   deleteRestockOrderAction,
 } from "@/lib/actions/restock-actions";
+import { buildWhatsAppRestockMessage } from "@/lib/utils/restock-formatters";
+import { KoroGlyph, KoroFace } from "@/components/brand/koro-face";
+import { ReceiptPaper, ReceiptDivider } from "./receipt-paper";
 import type { Product, RestockOrder, RestockOrderItemRow } from "@/lib/supabase/types";
 import {
   Search,
-  Receipt,
-  MessageSquare,
-  Clipboard,
-  Calendar,
-  Clock,
-  CheckCircle2,
+  ChevronRight,
+  MessageSquareShare,
   PackageCheck,
+  CheckCircle2,
   RotateCcw,
   Trash2,
-  XCircle,
-  PlusCircle,
-  Filter,
-  Truck,
-  ArrowUpDown,
-  Building2,
+  Plus,
+  Ban,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { cn } from "@/lib/utils";
 
 interface RestockHistoryViewProps {
   products: Product[];
   orders: RestockOrder[];
   items: RestockOrderItemRow[];
+  shopName?: string | null;
 }
+
+const CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  copy_clipboard: "Copied to clipboard",
+  manual: "Manual",
+};
 
 export function RestockHistoryView({
   products,
   orders,
   items,
+  shopName,
 }: RestockHistoryViewProps) {
   const router = useRouter();
   const openItemArrivalModal = useRestockStore((s) => s.openItemArrivalModal);
@@ -65,7 +67,8 @@ export function RestockHistoryView({
   const searchQuery = useRestockStore((s) => s.historySearchQuery);
   const setSearchQuery = useRestockStore((s) => s.setHistorySearchQuery);
 
-  // Delete modal state
+  // Receipt (open slip) and delete modal state
+  const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [orderToDelete, setOrderToDelete] = useState<RestockOrder | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -91,23 +94,11 @@ export function RestockHistoryView({
   const stats = useMemo(() => {
     const totalOrders = orders.length;
     const pendingOrders = orders.filter((o) => o.status === "ordered").length;
-    const receivedOrders = orders.filter((o) => o.status === "received").length;
-    const totalUnitsOrdered = items.reduce(
-      (sum, it) => sum + (Number(it.ordered_quantity) || 0),
-      0
-    );
     const totalUnitsReceived = items.reduce(
       (sum, it) => sum + (Number(it.received_quantity) || 0),
       0
     );
-
-    return {
-      totalOrders,
-      pendingOrders,
-      receivedOrders,
-      totalUnitsOrdered,
-      totalUnitsReceived,
-    };
+    return { totalOrders, pendingOrders, totalUnitsReceived };
   }, [orders, items]);
 
   // Filtered orders list
@@ -115,23 +106,19 @@ export function RestockHistoryView({
     return orders.filter((order) => {
       const orderItems = itemsByOrder.get(order.id) || [];
 
-      // Product filter
       if (filterProductId !== "all") {
         const hasProduct = orderItems.some((it) => it.product_id === filterProductId);
         if (!hasProduct) return false;
       }
 
-      // Status filter
       if (filterStatus !== "all" && order.status !== filterStatus) {
         return false;
       }
 
-      // Channel filter
       if (filterChannel !== "all" && order.channel !== filterChannel) {
         return false;
       }
 
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchesOrderNumber = order.order_number.toLowerCase().includes(q);
@@ -158,11 +145,8 @@ export function RestockHistoryView({
     searchQuery,
   ]);
 
-  const handleRecordItemArrival = (
-    item: RestockOrderItemRow,
-    order: RestockOrder
-  ) => {
-    const product = productsMap.get(item.product_id) || {
+  const resolveProduct = (item: RestockOrderItemRow, order: RestockOrder): Product =>
+    productsMap.get(item.product_id) || {
       id: item.product_id,
       name: item.product_name,
       current_stock: 0,
@@ -181,6 +165,15 @@ export function RestockHistoryView({
       updated_at: item.created_at,
     };
 
+  const handleRecordItemArrival = (
+    item: RestockOrderItemRow,
+    order: RestockOrder
+  ) => {
+    const product = resolveProduct(item, order);
+
+    // Close the receipt first so the arrival dialog is the only one open
+    setOpenOrderId(null);
+
     openItemArrivalModal({
       orderItemId: item.id,
       orderId: order.id,
@@ -192,6 +185,21 @@ export function RestockHistoryView({
       orderedQuantity: Number(item.ordered_quantity) || 1,
       receivedQuantity: Number(item.ordered_quantity) || 1,
     });
+  };
+
+  // Re-send an existing slip on WhatsApp (does not create a new slip)
+  const handleShareSlip = (order: RestockOrder) => {
+    const orderItems = itemsByOrder.get(order.id) || [];
+    const message = buildWhatsAppRestockMessage({
+      shopName: shopName || "My Store",
+      items: orderItems.map((it) => ({
+        product: resolveProduct(it, order),
+        quantity: Number(it.ordered_quantity) || 1,
+      })),
+      distributorName: order.distributor_name || undefined,
+      notes: order.notes || undefined,
+    });
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   };
 
   const handleCancelOrder = async (orderId: string) => {
@@ -218,6 +226,7 @@ export function RestockHistoryView({
 
     toast.success(`Order slip #${orderToDelete.order_number} deleted`);
     setOrderToDelete(null);
+    setOpenOrderId(null);
     router.refresh();
   };
 
@@ -226,393 +235,392 @@ export function RestockHistoryView({
     if (prod) {
       toggleProduct(prod);
       setActiveSubTab("draft");
-      toast.success(`Added ${prod.name} to Reorder Draft`);
+      toast.success(`Added ${prod.name} to your new order`);
     }
   };
 
+  const formatDate = (iso: string, withTime = false) =>
+    new Date(iso).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+    });
+
+  const statusMeta = (status: string) =>
+    status === "ordered"
+      ? { text: "Waiting for delivery", cls: "bg-[#fff1cc] text-amber-800 dark:bg-[#3a2f12] dark:text-amber-300" }
+      : status === "received"
+      ? { text: "Delivered", cls: "bg-[#e8f7ee] text-[#0f7a39] dark:bg-[#1c2b22] dark:text-[#5fd68c]" }
+      : { text: "Cancelled", cls: "bg-muted text-muted-foreground" };
+
+  const segment = (active: boolean) =>
+    cn(
+      "h-8 sm:h-8.5 cursor-pointer rounded-full px-3 sm:px-3.5 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap",
+      active ? "bg-card text-foreground shadow-xs font-semibold" : "text-muted-foreground hover:text-foreground"
+    );
+
+  const openOrder = openOrderId ? orders.find((o) => o.id === openOrderId) || null : null;
+  const openOrderItems = openOrder ? itemsByOrder.get(openOrder.id) || [] : [];
+  const hasActiveFilter =
+    filterProductId !== "all" || filterStatus !== "all" || filterChannel !== "all" || searchQuery.trim() !== "";
+
+  const statCards = [
+    {
+      label: "Waiting for delivery",
+      value: stats.pendingOrders,
+      glyph: "truck" as const,
+      surface: "bg-[#ffb110] text-black",
+    },
+    {
+      label: "Units delivered",
+      value: stats.totalUnitsReceived,
+      glyph: "check-circle" as const,
+      surface: "bg-[#e8f7ee] dark:bg-[#1c2b22]",
+    },
+    {
+      label: "Total slips",
+      value: stats.totalOrders,
+      glyph: "package" as const,
+      surface: "bg-[#e6f3fe] dark:bg-[#243442]",
+    },
+  ];
+
   return (
     <div className="space-y-6">
-      {/* Top History KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <Card className="border-border bg-card shadow-2xs p-3.5 sm:p-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase">
-            Total Slips
-          </p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-xl sm:text-2xl font-bold font-heading text-foreground">
-              {stats.totalOrders}
-            </span>
-            <Receipt className="h-5 w-5 text-primary opacity-80" />
+      {/* Summary */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {statCards.map((card) => (
+          <div
+            key={card.label}
+            className={`flex items-center justify-between gap-4 rounded-3xl p-5 sm:p-6 ${card.surface}`}
+          >
+            <div>
+              <p className="text-base font-semibold">{card.label}</p>
+              <p className="mt-2 font-heading text-5xl leading-none font-bold tracking-tight tabular-nums">
+                {card.value}
+              </p>
+            </div>
+            <KoroGlyph type={card.glyph} size={56} className="shrink-0" />
           </div>
-          <p className="text-[10px] text-muted-foreground mt-1">Permanent accounting record</p>
-        </Card>
-
-        <Card className="border-border bg-card shadow-2xs p-3.5 sm:p-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase">
-            Pending Delivery
-          </p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-xl sm:text-2xl font-bold font-heading text-amber-600 dark:text-amber-400">
-              {stats.pendingOrders}
-            </span>
-            <Clock className="h-5 w-5 text-amber-500 opacity-80" />
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1">Awaiting shop delivery</p>
-        </Card>
-
-        <Card className="border-border bg-card shadow-2xs p-3.5 sm:p-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase">
-            Units Delivered
-          </p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-xl sm:text-2xl font-bold font-heading text-emerald-600 dark:text-emerald-400">
-              {stats.totalUnitsReceived}
-            </span>
-            <PackageCheck className="h-5 w-5 text-emerald-500 opacity-80" />
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1">Added to shop stock</p>
-        </Card>
-
-        <Card className="border-border bg-card shadow-2xs p-3.5 sm:p-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase">
-            Units Ordered
-          </p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-xl sm:text-2xl font-bold font-heading text-foreground">
-              {stats.totalUnitsOrdered}
-            </span>
-            <Truck className="h-5 w-5 text-primary opacity-80" />
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1">Total across all orders</p>
-        </Card>
+        ))}
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="p-4 rounded-xl border border-border bg-card space-y-3 shadow-2xs">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search slip #, product name, or supplier..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9 text-xs"
-            />
-          </div>
+      {/* Search and status filter */}
+      <section aria-labelledby="restock-slips" className="space-y-4">
+        <h2 id="restock-slips" className="font-heading text-2xl font-bold tracking-tight text-foreground">
+          Your slips
+        </h2>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Filter by Product Dropdown */}
-            <select
-              value={filterProductId}
-              onChange={(e) => setFilterProductId(e.target.value)}
-              className="h-9 px-2.5 rounded-md border border-border bg-background text-xs font-medium text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-            >
-              <option value="all">All Products ({products.length})</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            placeholder="Search by slip number, item or supplier"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search slips"
+            className="h-12 w-full rounded-full border border-input bg-card pr-4 pl-12 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
 
-            {/* Filter by Status */}
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="h-9 px-2.5 rounded-md border border-border bg-background text-xs font-medium text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-            >
-              <option value="all">All Statuses</option>
-              <option value="ordered">Pending Delivery</option>
-              <option value="received">Delivered</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-
-            {/* Filter by Channel */}
-            <select
-              value={filterChannel}
-              onChange={(e) => setFilterChannel(e.target.value as any)}
-              className="h-9 px-2.5 rounded-md border border-border bg-background text-xs font-medium text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-            >
-              <option value="all">All Channels</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="copy_clipboard">Clipboard</option>
-              <option value="manual">Manual</option>
-            </select>
-
-            {(filterProductId !== "all" ||
-              filterStatus !== "all" ||
-              filterChannel !== "all" ||
-              searchQuery.trim() !== "") && (
-              <Button
+        <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3">
+          <div className="no-scrollbar flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full bg-muted p-1">
+            {(
+              [
+                ["all", "All"],
+                ["ordered", "Waiting"],
+                ["received", "Delivered"],
+                ["cancelled", "Cancelled"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
                 type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  setFilterProductId("all");
-                  setFilterStatus("all");
-                  setFilterChannel("all");
-                  setSearchQuery("");
-                }}
-                className="h-9 text-xs gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={() => setFilterStatus(value)}
+                className={segment(filterStatus === value)}
               >
-                <RotateCcw className="h-3 w-3" />
-                <span>Reset</span>
-              </Button>
-            )}
+                {label}
+              </button>
+            ))}
           </div>
+
+          {hasActiveFilter && (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterProductId("all");
+                setFilterStatus("all");
+                setFilterChannel("all");
+                setSearchQuery("");
+              }}
+              className="inline-flex h-8 sm:h-8.5 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs sm:text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
 
         {filterProductId !== "all" && (
-          <div className="pt-2 border-t border-border/50 flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">
-              Showing order slips for:{" "}
-              <strong className="text-foreground">
-                {productsMap.get(filterProductId)?.name || "Product"}
-              </strong>
+          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl bg-secondary px-4 py-2.5">
+            <span className="text-sm sm:text-base text-foreground">
+              Slips for <strong>{productsMap.get(filterProductId)?.name || "this item"}</strong>
             </span>
-            <Button
+            <button
               type="button"
-              variant="link"
-              size="xs"
               onClick={() => handleQuickReorder(filterProductId)}
-              className="h-auto p-0 text-primary font-semibold text-xs gap-1 cursor-pointer"
+              className="inline-flex h-8 sm:h-8.5 cursor-pointer items-center gap-1.5 rounded-full bg-primary px-3 text-xs sm:text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 shadow-xs"
             >
-              <PlusCircle className="h-3.5 w-3.5" />
-              <span>Add to Reorder Draft</span>
-            </Button>
+              <Plus className="h-4 w-4" />
+              <span>Add to new order</span>
+            </button>
           </div>
         )}
-      </div>
 
-      {/* Order Slips List */}
-      {filteredOrders.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-12 text-center space-y-3 bg-card">
-          <Receipt className="h-10 w-10 text-muted-foreground mx-auto" />
-          <p className="text-base font-semibold text-foreground">
-            No Restock Slips Found
-          </p>
-          <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-            {orders.length === 0
-              ? "You haven't created any restock orders yet. Prepare a draft on the 'Reorder Draft' tab and click Share on WhatsApp or Copy & Clear."
-              : "No orders match your selected filters. Try adjusting the search keywords or filters."}
-          </p>
-          {orders.length === 0 && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => setActiveSubTab("draft")}
-              className="mt-2 text-xs font-semibold cursor-pointer"
-            >
-              Go to Reorder Draft
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredOrders.map((order) => {
-            const orderItems = itemsByOrder.get(order.id) || [];
-            const isPending = order.status === "ordered";
-            const isReceived = order.status === "received";
-            const isCancelled = order.status === "cancelled";
-
-            const orderDate = new Date(order.order_date).toLocaleDateString("en-IN", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-
-            return (
-              <Card
-                key={order.id}
-                className={`border transition-all overflow-hidden shadow-2xs ${
-                  isPending
-                    ? "border-amber-500/40 bg-card"
-                    : "border-border bg-card"
-                }`}
+        {/* Slip list */}
+        {filteredOrders.length === 0 ? (
+          <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-border bg-card p-10 text-center">
+            <KoroFace size={64} tone="sky" />
+            <div className="space-y-1">
+              <p className="text-xl font-semibold text-foreground">No slips found</p>
+              <p className="mx-auto max-w-sm text-base text-muted-foreground">
+                {orders.length === 0
+                  ? "When you share or copy an order, its slip will be saved here."
+                  : "No slips match your search. Try a different word or reset."}
+              </p>
+            </div>
+            {orders.length === 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveSubTab("draft")}
+                className="inline-flex h-12 cursor-pointer items-center gap-2 rounded-full bg-primary px-6 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               >
-                {/* Slip Header */}
-                <CardHeader className="p-4 border-b border-border bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <span className="font-mono font-bold text-sm text-foreground">
-                      {order.order_number}
+                Start a new order
+              </button>
+            )}
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {filteredOrders.map((order) => {
+              const orderItems = itemsByOrder.get(order.id) || [];
+              const status = statusMeta(order.status);
+              const glyph =
+                order.status === "ordered" ? "truck" : order.status === "received" ? "check-circle" : "calendar";
+              const tile =
+                order.status === "ordered"
+                  ? "bg-[#fff1cc] dark:bg-[#3a2f12]"
+                  : order.status === "received"
+                  ? "bg-[#e8f7ee] dark:bg-[#1c2b22]"
+                  : "bg-muted";
+
+              return (
+                <li key={order.id}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setOpenOrderId(order.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setOpenOrderId(order.id);
+                      }
+                    }}
+                    className="group flex cursor-pointer items-center gap-4 rounded-3xl border border-border bg-card p-4 transition-colors hover:border-primary/40 sm:p-5"
+                  >
+                    <span className={cn("flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl", tile)}>
+                      <KoroGlyph type={glyph} size={44} />
                     </span>
 
-                    <Badge
-                      variant="outline"
-                      className="text-[11px] gap-1 font-medium bg-background"
-                    >
-                      {order.channel === "whatsapp" ? (
-                        <>
-                          <MessageSquare className="h-3 w-3 text-[#25D366]" />
-                          <span className="text-[#25D366]">WhatsApp</span>
-                        </>
-                      ) : order.channel === "copy_clipboard" ? (
-                        <>
-                          <Clipboard className="h-3 w-3 text-blue-500" />
-                          <span className="text-blue-500">Clipboard</span>
-                        </>
-                      ) : (
-                        <span>Manual</span>
-                      )}
-                    </Badge>
-
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Calendar className="h-3 w-3" />
-                      <span>{orderDate}</span>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <p className="text-lg font-semibold text-foreground">Slip {order.order_number}</p>
+                        <span className={cn("rounded-full px-3 py-0.5 text-sm font-semibold", status.cls)}>
+                          {status.text}
+                        </span>
+                      </div>
+                      <p className="text-base text-muted-foreground">
+                        {formatDate(order.order_date)}
+                        {order.distributor_name ? `, ${order.distributor_name}` : ""}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {orderItems.length} item{orderItems.length === 1 ? "" : "s"}, {order.total_units} units
+                      </p>
                     </div>
 
-                    {order.distributor_name && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1 bg-muted/60 px-2 py-0.5 rounded-md">
-                        <Building2 className="h-3 w-3 text-primary" />
-                        <span>Supplier: {order.distributor_name}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    {isPending && (
-                      <Badge
-                        variant="outline"
-                        className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 gap-1 text-xs"
-                      >
-                        <Clock className="h-3 w-3" />
-                        Pending Delivery
-                      </Badge>
-                    )}
-                    {isReceived && (
-                      <Badge
-                        variant="outline"
-                        className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 gap-1 text-xs"
-                      >
-                        <CheckCircle2 className="h-3 w-3" />
-                        Delivered
-                      </Badge>
-                    )}
-                    {isCancelled && (
-                      <Badge variant="secondary" className="gap-1 text-xs">
-                        <XCircle className="h-3 w-3" />
-                        Cancelled
-                      </Badge>
-                    )}
-                  </div>
-                </CardHeader>
-
-                {/* Items in Slip */}
-                <CardContent className="p-4 space-y-2.5">
-                  <div className="space-y-2">
-                    {orderItems.map((item) => {
-                      const itemIsPending = item.status === "pending";
-                      const itemIsReceived = item.status === "received";
-                      const prod = productsMap.get(item.product_id);
-
-                      return (
-                        <div
-                          key={item.id}
-                          className="p-3 rounded-lg border border-border/80 bg-muted/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs"
-                        >
-                          <div className="space-y-1 flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-foreground text-sm truncate">
-                                {item.product_name}
-                              </span>
-                              {prod?.category && (
-                                <Badge variant="outline" className="text-[10px] py-0 px-1.5">
-                                  {prod.category}
-                                </Badge>
-                              )}
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-3 text-muted-foreground text-[11px]">
-                              <span>
-                                Ordered:{" "}
-                                <strong className="text-foreground">
-                                  {item.ordered_quantity} units
-                                </strong>
-                              </span>
-                              {itemIsReceived && (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                  • Received: {item.received_quantity ?? item.ordered_quantity} units
-                                </span>
-                              )}
-                              {prod && (
-                                <span>• Current Stock in Shop: {prod.current_stock}</span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            {itemIsPending ? (
-                              <Button
-                                type="button"
-                                size="xs"
-                                onClick={() => handleRecordItemArrival(item, order)}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs gap-1.5 h-7 shadow-xs cursor-pointer"
-                              >
-                                <PackageCheck className="h-3.5 w-3.5" />
-                                <span>Record Arrival</span>
-                              </Button>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 text-[11px] gap-1"
-                              >
-                                <CheckCircle2 className="h-3 w-3" />
-                                Received
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {order.notes && (
-                    <div className="p-2.5 rounded-md bg-muted/30 border border-border/50 text-xs text-muted-foreground">
-                      <strong>Order Note:</strong> {order.notes}
-                    </div>
-                  )}
-                </CardContent>
-
-                {/* Slip Actions Footer */}
-                <CardFooter className="px-4 py-2.5 border-t border-border bg-muted/10 flex items-center justify-between text-xs">
-                  <div className="text-[11px] text-muted-foreground">
-                    {orderItems.length} product{orderItems.length > 1 ? "s" : ""} •{" "}
-                    {order.total_units} units total
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {isPending && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => handleCancelOrder(order.id)}
-                        className="text-[11px] text-muted-foreground hover:text-amber-600 cursor-pointer"
-                      >
-                        Cancel Order
-                      </Button>
-                    )}
-
-                    <Button
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setOrderToDelete(order)}
-                      className="text-[11px] text-muted-foreground hover:text-destructive cursor-pointer gap-1"
-                      title="Delete slip if entered by mistake"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleShareSlip(order);
+                      }}
+                      title="Send this slip on WhatsApp"
+                      aria-label={`Send slip ${order.order_number} on WhatsApp`}
+                      className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#25D366] text-white transition-opacity hover:opacity-90"
                     >
-                      <Trash2 className="h-3 w-3" />
-                      <span>Delete</span>
-                    </Button>
+                      <MessageSquareShare className="h-5 w-5" />
+                    </button>
+
+                    <ChevronRight className="hidden h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:block" />
                   </div>
-                </CardFooter>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* Receipt: an open slip, like a paper bill */}
+      <Dialog open={Boolean(openOrder)} onOpenChange={(open) => !open && setOpenOrderId(null)}>
+        <DialogContent className="max-w-md border-0 bg-transparent p-0 shadow-none">
+          {openOrder && (
+            <ReceiptPaper>
+              <DialogHeader className="sr-only">
+                <DialogTitle>Slip {openOrder.order_number}</DialogTitle>
+                <DialogDescription>Restock slip details</DialogDescription>
+              </DialogHeader>
+
+              {/* Header */}
+              <div className="flex flex-col items-center gap-2 px-6 pt-8 pb-6 text-center">
+                <KoroGlyph
+                  type={
+                    openOrder.status === "ordered"
+                      ? "truck"
+                      : openOrder.status === "received"
+                      ? "check-circle"
+                      : "calendar"
+                  }
+                  size={56}
+                />
+                <p className="text-base text-muted-foreground">Restock slip</p>
+                <p className="font-heading text-2xl font-bold tracking-tight text-foreground">
+                  {openOrder.order_number}
+                </p>
+                <span
+                  className={cn(
+                    "rounded-full px-3 py-0.5 text-sm font-semibold",
+                    statusMeta(openOrder.status).cls
+                  )}
+                >
+                  {statusMeta(openOrder.status).text}
+                </span>
+              </div>
+
+              <ReceiptDivider />
+
+              {/* Details */}
+              <dl className="space-y-3 px-6 py-5 text-base">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Date</dt>
+                  <dd className="text-right font-medium text-foreground">{formatDate(openOrder.order_date, true)}</dd>
+                </div>
+                {openOrder.distributor_name && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Supplier</dt>
+                    <dd className="text-right font-medium text-foreground">{openOrder.distributor_name}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Sent by</dt>
+                  <dd className="text-right font-medium text-foreground">
+                    {CHANNEL_LABEL[openOrder.channel] || "Manual"}
+                  </dd>
+                </div>
+              </dl>
+
+              <ReceiptDivider />
+
+              {/* Items */}
+              <ul className="no-scrollbar max-h-72 space-y-1 overflow-y-auto px-4 py-4">
+                {openOrderItems.map((item) => {
+                  const itemIsPending = item.status === "pending";
+                  return (
+                    <li key={item.id} className="flex items-center justify-between gap-3 rounded-2xl px-2 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold text-foreground">{item.product_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Ordered {item.ordered_quantity}
+                          {!itemIsPending && ` , received ${item.received_quantity ?? item.ordered_quantity}`}
+                        </p>
+                      </div>
+
+                      {itemIsPending && openOrder.status !== "cancelled" ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRecordItemArrival(item, openOrder)}
+                          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#14a44d] px-4 text-base font-semibold text-white transition-opacity hover:opacity-90 active:scale-95"
+                        >
+                          <PackageCheck className="h-5 w-5" />
+                          <span>Received</span>
+                        </button>
+                      ) : !itemIsPending ? (
+                        <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-medium text-[#14a44d]">
+                          <CheckCircle2 className="h-5 w-5" />
+                          Received
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <ReceiptDivider />
+
+              {/* Total */}
+              <div className="space-y-3 px-6 py-5">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-base text-muted-foreground">
+                    Total, {openOrderItems.length} item{openOrderItems.length === 1 ? "" : "s"}
+                  </span>
+                  <span className="font-heading text-2xl font-bold tabular-nums text-foreground">
+                    {openOrder.total_units} units
+                  </span>
+                </div>
+                {openOrder.notes && (
+                  <p className="rounded-2xl bg-muted px-4 py-3 text-base text-muted-foreground">
+                    Note: {openOrder.notes}
+                  </p>
+                )}
+              </div>
+
+              <ReceiptDivider />
+
+              {/* Actions */}
+              <div className="space-y-2 p-5">
+                <button
+                  type="button"
+                  onClick={() => handleShareSlip(openOrder)}
+                  className="inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#25D366] text-base font-bold text-white transition-opacity hover:opacity-90"
+                >
+                  <MessageSquareShare className="h-5 w-5" />
+                  <span>Send on WhatsApp</span>
+                </button>
+
+                <div className="flex items-center justify-center gap-1">
+                  {openOrder.status === "ordered" && (
+                    <button
+                      type="button"
+                      onClick={() => handleCancelOrder(openOrder.id)}
+                      className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-full px-4 text-base font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <Ban className="h-4 w-4" />
+                      <span>Cancel order</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setOrderToDelete(openOrder)}
+                    title="Delete slip if entered by mistake"
+                    className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-full px-4 text-base font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              </div>
+            </ReceiptPaper>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={Boolean(orderToDelete)} onOpenChange={(open) => !open && setOrderToDelete(null)}>
@@ -620,10 +628,11 @@ export function RestockHistoryView({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <Trash2 className="h-5 w-5" />
-              <span>Delete Restock Slip?</span>
+              <span>Delete this slip?</span>
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              Order slip <strong>#{orderToDelete?.order_number}</strong> will be permanently removed from your history. Normally slips should be kept for accounting history.
+            <DialogDescription className="text-base">
+              Slip <strong>#{orderToDelete?.order_number}</strong> will be removed from your history for good.
+              Normally slips are kept for your records.
             </DialogDescription>
           </DialogHeader>
 
@@ -631,21 +640,20 @@ export function RestockHistoryView({
             <Button
               type="button"
               variant="outline"
-              size="sm"
               onClick={() => setOrderToDelete(null)}
               disabled={isDeleting}
+              className="h-11 cursor-pointer rounded-full px-5 text-base"
             >
-              Keep Slip
+              Keep slip
             </Button>
             <Button
               type="button"
               variant="destructive"
-              size="sm"
               onClick={handleDeleteOrder}
               disabled={isDeleting}
-              className="gap-1.5"
+              className="h-11 cursor-pointer gap-1.5 rounded-full px-5 text-base"
             >
-              {isDeleting ? "Deleting..." : "Yes, Delete Slip"}
+              {isDeleting ? "Deleting..." : "Yes, delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

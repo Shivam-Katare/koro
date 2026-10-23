@@ -249,7 +249,7 @@ export function RestockItemSlipsDialog({ orders, items }: RestockItemSlipsDialog
 
         <div className="p-4 border-t border-border bg-muted/20 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            {pendingCount > 0 ? `⚠️ ${pendingCount} order pending delivery` : "All orders delivered"}
+            {pendingCount > 0 ? `${pendingCount} order pending delivery` : "All orders delivered"}
           </span>
           <Button
             type="button"

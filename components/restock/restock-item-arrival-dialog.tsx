@@ -72,7 +72,7 @@ export function RestockItemArrivalDialog() {
     }
 
     toast.success(
-      `Delivery recorded! ${target.product.name} stock updated: ${currentStock} ➔ ${res.newStock} units`
+      `Delivery recorded! ${target.product.name} stock updated: ${currentStock} to ${res.newStock} units`
     );
     closeItemArrivalModal();
     setDeliveryNotes("");

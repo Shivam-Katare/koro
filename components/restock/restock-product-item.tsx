@@ -1,22 +1,10 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import type { Product, RestockOrder, RestockOrderItemRow } from "@/lib/supabase/types";
 import { useRestockStore } from "@/lib/store/use-restock-store";
-import {
-  MapPin,
-  Plus,
-  Minus,
-  Check,
-  ShoppingCart,
-  PackageCheck,
-  Receipt,
-  MessageSquare,
-  Clipboard,
-  Clock,
-} from "lucide-react";
+import { KoroGlyph } from "@/components/brand/koro-face";
+import { MapPin, Plus, Minus, X, PackageCheck, Receipt, Truck, MessageSquare, Clipboard } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export interface PendingSlipItem extends RestockOrderItemRow {
   order: RestockOrder;
@@ -82,189 +70,177 @@ export function RestockProductItem({
     });
   };
 
+  const tileTone = isOut
+    ? "bg-[#ffe6e1] dark:bg-[#3b211d]"
+    : isLow
+    ? "bg-[#fff1cc] dark:bg-[#3a2f12]"
+    : "bg-[#e8f7ee] dark:bg-[#1c2b22]";
+
+  const statusPill = isOut
+    ? { text: "Out of stock", cls: "bg-[#ffe6e1] text-[#c4301c] dark:bg-[#3b211d] dark:text-[#ff8a78]" }
+    : isLow
+    ? { text: `Low: ${product.current_stock} left`, cls: "bg-[#fff1cc] text-amber-800 dark:bg-[#3a2f12] dark:text-amber-300" }
+    : { text: `${product.current_stock} in stock`, cls: "bg-[#e8f7ee] text-[#0f7a39] dark:bg-[#1c2b22] dark:text-[#5fd68c]" };
+
   return (
     <div
-      className={`rounded-xl border transition-all overflow-hidden ${
-        isSelected
-          ? "border-primary/40 bg-primary/5 shadow-xs"
-          : "border-border bg-card hover:border-border/80"
-      }`}
+      className={cn(
+        "overflow-hidden rounded-3xl border bg-card transition-colors",
+        isSelected ? "border-primary/50" : "border-border"
+      )}
     >
-      {/* Main Product Info & Reorder Controls */}
-      <div className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="space-y-1.5 flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-sm text-foreground truncate">
-              {product.name}
-            </span>
-            {product.brand && (
-              <span className="text-xs text-muted-foreground">({product.brand})</span>
-            )}
-            <Badge variant="outline" className="text-[10px] py-0 px-1.5">
-              {product.category}
-            </Badge>
-          </div>
+      {/* Product info and the single "Add" control */}
+      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <span className={cn("flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl", tileTone)}>
+            <KoroGlyph type={isOut || isLow ? "alert" : "check-circle"} size={44} />
+          </span>
 
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {product.storage_location && (
-              <span className="flex items-center gap-1 font-medium text-foreground bg-muted/70 px-1.5 py-0.5 rounded-md">
-                <MapPin className="h-3 w-3 text-primary shrink-0" />
-                {product.storage_location}
+          <div className="min-w-0 space-y-1.5">
+            <p className="truncate text-lg font-semibold leading-snug text-foreground">
+              {product.name}
+              {product.brand && <span className="font-normal text-muted-foreground"> ({product.brand})</span>}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+              <span className={cn("rounded-full px-3 py-0.5 text-sm font-semibold", statusPill.cls)}>
+                {statusPill.text}
               </span>
-            )}
-            <span>
-              Current: <strong className="text-foreground">{product.current_stock}</strong> (Min: {minThreshold})
-            </span>
-            {isOut && (
-              <Badge variant="destructive" className="text-[10px] py-0">
-                Out of stock
-              </Badge>
-            )}
-            {isLow && (
-              <span className="text-amber-600 dark:text-amber-400 font-medium text-[11px]">
-                ⚠️ Low stock
-              </span>
-            )}
+              <span>Reorder at {minThreshold}</span>
+              {product.storage_location && (
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  {product.storage_location}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
-          <div className="flex items-center border border-border rounded-lg bg-background overflow-hidden h-8">
+        <div className="flex shrink-0 items-center justify-end gap-2">
+          {isSelected ? (
+            <>
+              <div className="flex h-9 sm:h-9.5 items-center rounded-full bg-secondary">
+                <button
+                  type="button"
+                  onClick={() => handleStep(-1)}
+                  disabled={orderQty <= 1}
+                  aria-label="Decrease quantity"
+                  className="flex h-9 sm:h-9.5 w-8 cursor-pointer items-center justify-center rounded-l-full text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  value={orderQty}
+                  onChange={handleQtyChange}
+                  aria-label="Quantity to order"
+                  className="h-9 sm:h-9.5 w-11 bg-transparent text-center text-sm font-bold tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleStep(1)}
+                  aria-label="Increase quantity"
+                  className="flex h-9 sm:h-9.5 w-8 cursor-pointer items-center justify-center rounded-r-full text-primary transition-colors hover:bg-primary/10"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggleProduct(product)}
+                aria-label="Remove from order"
+                title="Remove from order"
+                className="flex h-9 sm:h-9.5 w-9 sm:w-9.5 cursor-pointer items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </>
+          ) : (
             <button
               type="button"
-              onClick={() => handleStep(-1)}
-              disabled={!isSelected || orderQty <= 1}
-              aria-label="Decrease quantity"
-              className="px-2 h-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+              onClick={() => toggleProduct(product)}
+              className="inline-flex h-9 sm:h-9.5 cursor-pointer items-center gap-1.5 rounded-full bg-primary px-4 text-xs sm:text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 active:scale-95 shadow-xs"
             >
-              <Minus className="h-3 w-3" />
+              <Plus className="h-4 w-4" />
+              <span>Add to order</span>
             </button>
-            <Input
-              type="number"
-              min="1"
-              value={isSelected ? orderQty : ""}
-              placeholder="Qty"
-              onChange={handleQtyChange}
-              className="w-14 h-full border-0 text-center text-xs font-semibold focus-visible:ring-0 p-0"
-            />
-            <button
-              type="button"
-              onClick={() => handleStep(1)}
-              aria-label="Increase quantity"
-              className="px-2 h-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
-
-          <Button
-            type="button"
-            size="sm"
-            variant={isSelected ? "default" : "outline"}
-            onClick={() => toggleProduct(product)}
-            className={`h-8 text-xs font-medium gap-1.5 cursor-pointer ${
-              isSelected ? "shadow-xs" : ""
-            }`}
-          >
-            {isSelected ? (
-              <>
-                <Check className="h-3.5 w-3.5" />
-                <span>Added</span>
-              </>
-            ) : (
-              <>
-                <ShoppingCart className="h-3.5 w-3.5" />
-                <span>Add</span>
-              </>
-            )}
-          </Button>
+          )}
         </div>
       </div>
 
-      {/* Attached Order Slip & Record Arrival Banner */}
+      {/* Waiting for delivery: arrival is recorded per item */}
       {latestPending ? (
-        <div className="border-t border-amber-500/30 bg-amber-500/10 dark:bg-amber-950/20 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2 text-xs min-w-0">
-            <div className="h-7 w-7 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
-              <Clock className="h-3.5 w-3.5" />
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#fff1cc]/70 px-4 py-2.5 sm:px-5 dark:bg-[#3a2f12]/70">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            <Truck className="h-4 w-4 sm:h-5 sm:w-5 shrink-0 text-amber-700 dark:text-amber-300" />
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-bold text-amber-900 dark:text-amber-200">
-                  Ordered {latestPending.ordered_quantity} units
-                </span>
-                <span className="text-[11px] text-amber-800 dark:text-amber-300">
-                  on{" "}
+              <p className="text-sm sm:text-base font-semibold text-foreground">
+                {latestPending.ordered_quantity} on the way
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  ordered{" "}
                   {new Date(latestPending.order.order_date).toLocaleDateString("en-IN", {
                     day: "numeric",
                     month: "short",
                   })}
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 dark:text-amber-300">
-                  ({latestPending.order.channel === "whatsapp" ? (
-                    <>
-                      <MessageSquare className="h-3 w-3 text-[#25D366]" />
-                      <span>via WhatsApp</span>
-                    </>
-                  ) : latestPending.order.channel === "copy_clipboard" ? (
-                    <>
-                      <Clipboard className="h-3 w-3 text-blue-500" />
-                      <span>via Clipboard</span>
-                    </>
-                  ) : (
-                    <span>Manual</span>
-                  )})
-                </span>
-              </div>
-              <p className="text-[10px] text-amber-800/80 dark:text-amber-300/80 font-mono">
-                Slip #{latestPending.order.order_number}
-                {latestPending.order.distributor_name ? ` • ${latestPending.order.distributor_name}` : ""}
+              </p>
+              <p className="flex flex-wrap items-center gap-x-2 text-xs sm:text-sm text-muted-foreground">
+                <span>Slip {latestPending.order.order_number}</span>
+                {latestPending.order.channel === "whatsapp" ? (
+                  <span className="inline-flex items-center gap-1">
+                    <MessageSquare className="h-3.5 w-3.5 text-[#25D366]" />
+                    WhatsApp
+                  </span>
+                ) : latestPending.order.channel === "copy_clipboard" ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Clipboard className="h-3.5 w-3.5" />
+                    Copied
+                  </span>
+                ) : null}
+                {latestPending.order.distributor_name && <span>{latestPending.order.distributor_name}</span>}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex shrink-0 items-center gap-2">
             {totalSlipsCount > 1 && (
-              <Button
+              <button
                 type="button"
-                variant="ghost"
-                size="xs"
                 onClick={() => openItemSlipsModal(product)}
-                className="text-[11px] h-7 gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
                 title="View all past slips for this item"
+                className="inline-flex h-8 sm:h-8.5 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
               >
-                <Receipt className="h-3 w-3" />
-                <span>{totalSlipsCount} Slips</span>
-              </Button>
+                <Receipt className="h-3.5 w-3.5" />
+                <span>{totalSlipsCount} slips</span>
+              </button>
             )}
-
-            <Button
+            <button
               type="button"
-              size="xs"
               onClick={() => handleRecordArrival(latestPending)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs gap-1.5 h-7 shadow-xs cursor-pointer"
+              className="inline-flex h-8 sm:h-8.5 cursor-pointer items-center gap-1.5 rounded-full bg-[#14a44d] px-3.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 active:scale-95 shadow-xs"
             >
-              <PackageCheck className="h-3.5 w-3.5" />
-              <span>Record Arrival</span>
-            </Button>
+              <PackageCheck className="h-4 w-4" />
+              <span>Record arrival</span>
+            </button>
           </div>
         </div>
       ) : totalSlipsCount > 0 ? (
-        <div className="border-t border-border/40 bg-muted/20 px-3.5 py-1.5 flex items-center justify-between text-xs">
-          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-            <Check className="h-3 w-3 text-emerald-500" />
-            <span>All ordered stock delivered</span>
+        <div className="flex items-center justify-between gap-3 bg-muted/50 px-4 py-2.5 sm:px-5">
+          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <PackageCheck className="h-4 w-4 text-[#14a44d]" />
+            All ordered stock delivered
           </span>
-          <Button
+          <button
             type="button"
-            variant="ghost"
-            size="xs"
             onClick={() => openItemSlipsModal(product)}
-            className="text-[11px] h-6 gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
+            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
           >
-            <Receipt className="h-3 w-3" />
-            <span>{totalSlipsCount} Past Restock Slips</span>
-          </Button>
+            <Receipt className="h-4 w-4" />
+            <span>{totalSlipsCount} past slips</span>
+          </button>
         </div>
       ) : null}
     </div>

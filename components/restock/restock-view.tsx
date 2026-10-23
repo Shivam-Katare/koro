@@ -10,8 +10,7 @@ import { RestockHistoryView } from "./restock-history-view";
 import { RestockArrivalDialog } from "./restock-arrival-dialog";
 import { RestockItemArrivalDialog } from "./restock-item-arrival-dialog";
 import { RestockItemSlipsDialog } from "./restock-item-slips-dialog";
-import { ShoppingCart, Receipt, Clock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface RestockViewProps {
   shop: Shop | null;
@@ -54,53 +53,37 @@ export function RestockView({
 
   const pendingOrdersCount = orders.filter((o) => o.status === "ordered").length;
 
+  const tabClass = (active: boolean) =>
+    cn(
+      "inline-flex h-9 sm:h-10 cursor-pointer items-center gap-1.5 sm:gap-2 rounded-full px-3.5 sm:px-4.5 text-xs sm:text-sm font-semibold transition-colors",
+      active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+    );
+
   return (
-    <div className="space-y-6">
-      {/* Header with Sub-tab Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="font-heading text-2xl font-bold text-foreground">
-            Restock Management
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Prepare purchase orders, share via WhatsApp, track slips per product, and record stock arrival.
+    <div className="space-y-8">
+      {/* Title and the two views */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="space-y-1.5">
+          <h1 className="font-heading text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Restock</h1>
+          <p className="text-base text-muted-foreground sm:text-lg">
+            Pick what to reorder, send it to your supplier, then mark it received.
           </p>
         </div>
 
-        {/* Sub-tab Pill Navigation */}
-        <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border text-xs shrink-0 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setActiveSubTab("draft")}
-            className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === "draft"
-                ? "bg-background text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <ShoppingCart className="h-4 w-4 text-primary" />
-            <span>Reorder Draft</span>
+        <div className="flex shrink-0 items-center self-start rounded-full bg-muted p-1 sm:self-auto">
+          <button type="button" onClick={() => setActiveSubTab("draft")} className={tabClass(activeSubTab === "draft")}>
+            New order
           </button>
-
           <button
             type="button"
             onClick={() => setActiveSubTab("history")}
-            className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === "history"
-                ? "bg-background text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={tabClass(activeSubTab === "history")}
           >
-            <Receipt className="h-4 w-4 text-primary" />
-            <span>Restock Slips &amp; History</span>
+            <span>Past orders</span>
             {pendingOrdersCount > 0 && (
-              <Badge
-                variant="outline"
-                className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[10px] py-0 px-1.5 font-bold gap-0.5"
-              >
-                <Clock className="h-2.5 w-2.5" />
+              <span className="rounded-full bg-[#ffb110] px-2 py-0.5 text-sm font-bold text-black tabular-nums">
                 {pendingOrdersCount}
-              </Badge>
+              </span>
             )}
           </button>
         </div>
@@ -111,18 +94,12 @@ export function RestockView({
           {/* Summary KPI Cards */}
           <RestockStats products={allProducts} />
 
-          {/* 2-Column Responsive Workspace */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left: Product Selector with Attached Slips & Arrival Button */}
-            <div className="lg:col-span-7 xl:col-span-8 space-y-4">
-              <div className="space-y-1">
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Inventory Status &amp; Reorder Selection
-                </h3>
-                <p className="text-[11px] text-muted-foreground">
-                  Items are filtered based on stock threshold. When orders are placed, slips and Record Arrival buttons stay attached to each row.
-                </p>
-              </div>
+          {/* Workspace: items on the left, receipt on the right */}
+          <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
+            <section aria-labelledby="restock-items" className="space-y-4 lg:col-span-7 xl:col-span-8">
+              <h2 id="restock-items" className="font-heading text-2xl font-bold tracking-tight text-foreground">
+                Your items
+              </h2>
               <RestockProductList
                 products={allProducts}
                 orders={orders}
@@ -131,25 +108,27 @@ export function RestockView({
                 shopCategory={shop?.category}
                 onProductAdded={handleProductAdded}
               />
-            </div>
+            </section>
 
-            {/* Right: Live Purchase Order Draft */}
-            <div className="lg:col-span-5 xl:col-span-4 lg:sticky lg:top-20 space-y-4">
-              <div className="space-y-1">
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Active Purchase Order
-                </h3>
-                <p className="text-[11px] text-muted-foreground">
-                  Review quantities, share on WhatsApp, or copy. Order slips are automatically created and tracked.
-                </p>
-              </div>
+            <section
+              aria-labelledby="restock-order"
+              className="space-y-4 lg:sticky lg:top-24 lg:col-span-5 xl:col-span-4"
+            >
+              <h2 id="restock-order" className="font-heading text-2xl font-bold tracking-tight text-foreground">
+                Order slip
+              </h2>
               <RestockPurchaseList shop={shop} onProductAdded={handleProductAdded} />
-            </div>
+            </section>
           </div>
         </>
       ) : (
-        /* Full Restock History View */
-        <RestockHistoryView products={allProducts} orders={orders} items={items} />
+        /* Past orders as receipts */
+        <RestockHistoryView
+          products={allProducts}
+          orders={orders}
+          items={items}
+          shopName={shop?.name}
+        />
       )}
 
       {/* Bulk Stock Arrival Dialog (from draft) */}

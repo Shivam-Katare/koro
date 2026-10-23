@@ -228,7 +228,7 @@ export function RestockAddTrendingDialog({
 
           <div className="p-2.5 rounded-lg bg-muted/40 border border-border/60 text-[11px] text-muted-foreground space-y-1">
             <p className="flex items-center gap-1.5 text-foreground font-medium">
-              💡 <span>Zero extra hassle</span>
+              <span>Zero extra hassle</span>
             </p>
             <p>
               This item is added directly to your purchase order slip. When the delivery arrives, you can record arrival into your inventory with one click.

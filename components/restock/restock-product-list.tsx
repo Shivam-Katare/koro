@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Search, CheckCheck, CheckCircle2, PackageSearch, Sparkles } from "lucide-react";
+import { Search, Plus, ListPlus, PackageSearch } from "lucide-react";
+import { KoroFace } from "@/components/brand/koro-face";
 import type { Product, RestockOrder, RestockOrderItemRow } from "@/lib/supabase/types";
 import { useRestockStore } from "@/lib/store/use-restock-store";
 import { isProductDepleted } from "@/lib/utils/restock-formatters";
 import { RestockProductItem, type PendingSlipItem } from "./restock-product-item";
 import { RestockAddTrendingDialog } from "./restock-add-trending-dialog";
+import { cn } from "@/lib/utils";
 
 interface RestockProductListProps {
   products: Product[];
@@ -87,137 +87,102 @@ export function RestockProductList({
     });
   }, [filterTab, depletedProducts, products, searchQuery]);
 
+  const openNewItem = (name: string) => {
+    setInitialTrendingName(name);
+    setIsAddTrendingOpen(true);
+  };
+
+  const segment = (active: boolean) =>
+    cn(
+      "h-10 cursor-pointer rounded-full px-4 text-base font-medium transition-colors",
+      active ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"
+    );
+
   return (
     <div className="space-y-4">
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search low stock, brand, or location..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 h-10 text-xs"
-          />
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          placeholder="Search by name, brand or shelf"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label="Search products"
+          className="h-12 w-full rounded-full border border-input bg-card pr-4 pl-12 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+        />
+      </div>
+
+      {/* Two filters, one bulk action */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center rounded-full bg-muted p-1">
+          <button type="button" onClick={() => setFilterTab("depleted")} className={segment(filterTab === "depleted")}>
+            Needs reorder ({depletedProducts.length})
+          </button>
+          <button type="button" onClick={() => setFilterTab("all")} className={segment(filterTab === "all")}>
+            All items ({products.length})
+          </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border text-xs">
-            <button
-              type="button"
-              onClick={() => setFilterTab("depleted")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                filterTab === "depleted"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Low Stock ({depletedProducts.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilterTab("all")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                filterTab === "all"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              All ({products.length})
-            </button>
-          </div>
-
-          {depletedProducts.length > 0 && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => selectAllLowStock(products)}
-              className="h-9 text-xs font-medium gap-1.5 shrink-0 cursor-pointer"
-              title="Add all low and out-of-stock items to order draft"
-            >
-              <CheckCheck className="h-3.5 w-3.5 text-primary" />
-              <span className="hidden sm:inline">Select All Low Stock</span>
-              <span className="sm:hidden">Select All</span>
-            </Button>
-          )}
-
-          <Button
+        {depletedProducts.length > 0 && (
+          <button
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setInitialTrendingName(searchQuery.trim());
-              setIsAddTrendingOpen(true);
-            }}
-            className="h-9 text-xs font-semibold gap-1.5 shrink-0 border-amber-500/30 text-amber-700 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer shadow-2xs"
-            title="Order a new item or trending market stock directly on this restock slip"
+            onClick={() => selectAllLowStock(products)}
+            title="Add every low and out-of-stock item to the order"
+            className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-secondary px-5 text-base font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
           >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">+ Order New / Trending Item</span>
-            <span className="sm:hidden">+ New Item</span>
-          </Button>
-        </div>
+            <ListPlus className="h-5 w-5" />
+            <span>Add all low stock</span>
+          </button>
+        )}
       </div>
 
       {/* Product List */}
       {filteredProducts.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-3 bg-card">
+        <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-border bg-card p-10 text-center">
           {filterTab === "depleted" && !searchQuery.trim() ? (
             <>
-              <CheckCircle2 className="h-9 w-9 text-emerald-500 mx-auto" />
-              <p className="text-sm font-semibold text-foreground">Stock is Healthy!</p>
-              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                None of your products are currently low or out of stock. Switch to &ldquo;All&rdquo; tab or order a new trending item below.
-              </p>
-              <Button
+              <KoroFace size={64} tone="mint" />
+              <div className="space-y-1">
+                <p className="text-xl font-semibold text-foreground">Everything is stocked</p>
+                <p className="mx-auto max-w-sm text-base text-muted-foreground">
+                  Nothing is low or out of stock right now. You can still order a new item.
+                </p>
+              </div>
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setInitialTrendingName("");
-                  setIsAddTrendingOpen(true);
-                }}
-                className="h-8 text-xs font-semibold gap-1.5 mx-auto cursor-pointer border-amber-500/30 text-amber-700 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20"
+                onClick={() => openNewItem("")}
+                className="inline-flex h-12 cursor-pointer items-center gap-2 rounded-full bg-primary px-6 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>+ Order New / Trending Item</span>
-              </Button>
+                <Plus className="h-5 w-5" />
+                <span>Order a new item</span>
+              </button>
             </>
           ) : (
             <>
-              <PackageSearch className="h-9 w-9 text-muted-foreground mx-auto" />
-              <p className="text-sm font-semibold text-foreground">
-                {searchQuery.trim()
-                  ? `No Products Found for "${searchQuery.trim()}"`
-                  : "No Products Found"}
-              </p>
-              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                {searchQuery.trim()
-                  ? `Want to order "${searchQuery.trim()}" as a new or trending item directly on this restock slip?`
-                  : "Try adjusting your search keywords or add a new trending item directly."}
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => {
-                  setInitialTrendingName(searchQuery.trim());
-                  setIsAddTrendingOpen(true);
-                }}
-                className="h-8 text-xs font-semibold gap-1.5 mx-auto cursor-pointer"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>
+              <PackageSearch className="h-12 w-12 text-muted-foreground" />
+              <div className="space-y-1">
+                <p className="text-xl font-semibold text-foreground">
+                  {searchQuery.trim() ? `Nothing found for "${searchQuery.trim()}"` : "No products found"}
+                </p>
+                <p className="mx-auto max-w-sm text-base text-muted-foreground">
                   {searchQuery.trim()
-                    ? `Add "${searchQuery.trim()}" to Order Slip`
-                    : "+ Order New / Trending Item"}
-                </span>
-              </Button>
+                    ? "Want to order it as a new item on your next slip?"
+                    : "Try a different search, or order a new item."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => openNewItem(searchQuery.trim())}
+                className="inline-flex h-12 cursor-pointer items-center gap-2 rounded-full bg-primary px-6 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <Plus className="h-5 w-5" />
+                <span>{searchQuery.trim() ? `Add "${searchQuery.trim()}" to order` : "Order a new item"}</span>
+              </button>
             </>
           )}
         </div>
       ) : (
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           {filteredProducts.map((product) => (
             <RestockProductItem
               key={product.id}
