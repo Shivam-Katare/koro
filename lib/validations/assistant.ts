@@ -3,6 +3,7 @@ import { z } from "zod";
 export const queryAssistantSchema = z.object({
   shopId: z.string().uuid("Invalid shop ID"),
   query: z.string().trim().min(1, "Please speak or type a question").max(500),
+  conversationId: z.string().optional(),
   conversationHistory: z
     .array(
       z.object({
@@ -36,6 +37,7 @@ export const confirmAssistantActionSchema = z.object({
   newLocation: z.string().optional(),
   currentPrice: z.number().optional().nullable(),
   newPrice: z.number().nonnegative().optional(),
+  conversationId: z.string().optional(),
 });
 
 

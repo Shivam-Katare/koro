@@ -85,7 +85,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     return { success: false, error: "Please sign in to talk to your assistant" };
   }
 
-  const { shopId, query } = parseResult.data;
+  const { shopId, query, conversationId } = parseResult.data;
 
   // 1. Record user message in Supabase
   await (supabase.from("assistant_messages") as any).insert({
@@ -94,6 +94,9 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     role: "user",
     content: query,
     task_type: "general",
+    metadata: {
+      conversationId: conversationId || null,
+    },
   });
 
   const apiKey =
@@ -162,6 +165,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
         content: resultPayload.content,
         task_type: resultPayload.taskType,
         metadata: {
+          conversationId: conversationId || null,
           structuredData: resultPayload.structuredData || null,
           pendingAction: resultPayload.pendingAction || null,
         },
@@ -421,6 +425,7 @@ Rules:
             content: finalPayload.content,
             task_type: finalPayload.taskType,
             metadata: {
+              conversationId: conversationId || null,
               structuredData: finalPayload.structuredData || null,
               pendingAction: finalPayload.pendingAction || null,
             },
@@ -444,6 +449,9 @@ Rules:
         role: "assistant",
         content: text,
         task_type: "general",
+        metadata: {
+          conversationId: conversationId || null,
+        },
       });
 
       return { success: true, message: finalPayload };
@@ -769,7 +777,150 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 }
 
 // -------------------------------------------------------------
-// Fetch Conversation History Server Action
+// Fetch All Conversations For Shop Server Action
+// -------------------------------------------------------------
+export interface AssistantConversationSummary {
+  id: string;
+  title: string;
+  lastMessage: string;
+  lastTimestamp: string;
+  createdAt: string;
+  isLive: boolean;
+  messageCount: number;
+}
+
+export async function fetchAssistantConversationsAction(shopId: string) {
+  if (!shopId) return { success: false, conversations: [] };
+
+  const supabase = await createClient();
+  try {
+    const { data: messages, error } = await (supabase.from("assistant_messages") as any)
+      .select("*")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: false })
+      .limit(300);
+
+    if (error) throw error;
+
+    const convMap = new Map<string, AssistantConversationSummary>();
+
+    for (const msg of messages || []) {
+      const meta = (msg.metadata as any) || {};
+      const convId = meta.conversationId || "conv_legacy";
+
+      if (!convMap.has(convId)) {
+        convMap.set(convId, {
+          id: convId,
+          title: msg.role === "user" ? msg.content : (meta.title || "Store Conversation"),
+          lastMessage: msg.content,
+          lastTimestamp: msg.created_at,
+          createdAt: msg.created_at,
+          isLive: !!meta.liveSession,
+          messageCount: 1,
+        });
+      } else {
+        const existing = convMap.get(convId)!;
+        existing.messageCount += 1;
+        existing.createdAt = msg.created_at;
+        if (msg.role === "user") {
+          existing.title = msg.content;
+        }
+        if (meta.liveSession) {
+          existing.isLive = true;
+        }
+      }
+    }
+
+    const conversations = Array.from(convMap.values()).sort(
+      (a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()
+    );
+
+    return { success: true, conversations };
+  } catch (err) {
+    console.error("Failed to load conversations:", err);
+    return { success: false, conversations: [] };
+  }
+}
+
+// -------------------------------------------------------------
+// Fetch Messages For Specific Conversation Server Action
+// -------------------------------------------------------------
+export async function fetchAssistantConversationMessagesAction(
+  shopId: string,
+  conversationId: string
+) {
+  if (!shopId) return { success: false, messages: [] };
+
+  const supabase = await createClient();
+  try {
+    const { data: messages, error } = await (supabase.from("assistant_messages") as any)
+      .select("*")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: true })
+      .limit(200);
+
+    if (error) throw error;
+
+    const filtered = (messages || []).filter((m: any) => {
+      const meta = (m.metadata as any) || {};
+      const cId = meta.conversationId || "conv_legacy";
+      return cId === conversationId;
+    });
+
+    return {
+      success: true,
+      messages: filtered.map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        taskType: m.task_type,
+        structuredData: (m.metadata as any)?.structuredData,
+        pendingAction: (m.metadata as any)?.pendingAction,
+        createdAt: m.created_at,
+      })),
+    };
+  } catch (err) {
+    console.error("Failed to load conversation messages:", err);
+    return { success: false, messages: [] };
+  }
+}
+
+// -------------------------------------------------------------
+// Delete Single Conversation Server Action
+// -------------------------------------------------------------
+export async function deleteAssistantConversationAction(
+  shopId: string,
+  conversationId: string
+) {
+  if (!shopId || !conversationId) return { success: false };
+
+  const supabase = await createClient();
+  try {
+    const { data: messages } = await (supabase.from("assistant_messages") as any)
+      .select("id, metadata")
+      .eq("shop_id", shopId);
+
+    const idsToDelete = (messages || [])
+      .filter((m: any) => ((m.metadata as any)?.conversationId || "conv_legacy") === conversationId)
+      .map((m: any) => m.id);
+
+    if (idsToDelete.length > 0) {
+      const { error } = await (supabase.from("assistant_messages") as any)
+        .delete()
+        .in("id", idsToDelete);
+      if (error) throw error;
+    }
+
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to delete conversation:", err);
+    return { success: false };
+  }
+}
+
+// -------------------------------------------------------------
+// Fetch Conversation History Server Action (Legacy / Fallback)
 // -------------------------------------------------------------
 export async function fetchAssistantHistoryAction(shopId: string) {
   if (!shopId) return { success: false, messages: [] };
@@ -792,7 +943,7 @@ export async function fetchAssistantHistoryAction(shopId: string) {
 }
 
 // -------------------------------------------------------------
-// Clear Conversation History Server Action
+// Clear All Conversation History Server Action
 // -------------------------------------------------------------
 export async function clearAssistantHistoryAction(shopId: string) {
   if (!shopId) return { success: false };

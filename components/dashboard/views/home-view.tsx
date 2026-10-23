@@ -1,96 +1,217 @@
 "use client";
 
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { InventoryStats } from "@/components/inventory/inventory-stats";
-import { InventoryTable } from "@/components/inventory/inventory-table";
 import { AddProductDialog } from "@/components/inventory/add-product-dialog";
-import { AssistantVoiceCard } from "@/components/assistant/assistant-voice-card";
+import { HomeRemindersFeed } from "@/components/dashboard/home-reminders-feed";
+import { HomeHero } from "@/components/dashboard/home-hero";
+import { KoroFace } from "@/components/brand/koro-face";
+import { useDashboardNav } from "@/lib/hooks/use-dashboard-nav";
+import { useAssistantStore } from "@/lib/store/use-assistant-store";
+import { computeGentleReminders } from "@/lib/utils/home-reminders";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, PackageSearch, Sparkles } from "lucide-react";
-import type { Shop, Profile, Product } from "@/lib/supabase/types";
+import {
+  PlusCircle,
+  MapPin,
+  Package,
+  AlertTriangle,
+  IndianRupee,
+} from "lucide-react";
+import type {
+  Shop,
+  Profile,
+  Product,
+  RestockOrder,
+  StockMovement,
+  SalesSlip,
+} from "@/lib/supabase/types";
+import toast from "react-hot-toast";
 
 interface HomeViewProps {
   shop: Shop | null;
   profile: Profile | null;
   products: Product[];
+  restockOrders?: RestockOrder[];
+  stockMovements?: StockMovement[];
+  salesSlips?: SalesSlip[];
 }
 
-export function HomeView({ shop, profile, products }: HomeViewProps) {
+export function HomeView({
+  shop,
+  profile,
+  products,
+  restockOrders = [],
+  stockMovements = [],
+  salesSlips = [],
+}: HomeViewProps) {
+  const { setActiveTab } = useDashboardNav();
+  const { openDrawer } = useAssistantStore();
+
+  // Home chat bar state
+  const [homeQuery, setHomeQuery] = useState("");
+  const [isHomeDictating, setIsHomeDictating] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const homeRecognitionRef = useRef<any>(null);
+
+  const sampleProductName = products[0]?.name || "Lakme";
+  const firstName = (profile?.full_name || "Owner").trim().split(/\s+/)[0] || "Owner";
+
+  // Quick suggestion prompts (Notion AI style)
+  const quickChips = [
+    { label: `Where is ${sampleProductName}?`, query: `Where is ${sampleProductName}?`, icon: MapPin },
+    { label: `Stock of ${sampleProductName}`, query: `Stock of ${sampleProductName}`, icon: Package },
+    { label: "What is low on stock?", query: "What is low on stock?", icon: AlertTriangle },
+    { label: `Price of ${sampleProductName}`, query: `Price of ${sampleProductName}`, icon: IndianRupee },
+  ];
+
+  // Initialize Speech Recognition for Home Chat Bar Dictation
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = "en-IN";
+
+        recognition.onstart = () => {
+          setIsHomeDictating(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let currentTranscript = "";
+          for (let i = 0; i < event.results.length; ++i) {
+            currentTranscript += event.results[i][0].transcript;
+          }
+          if (currentTranscript) {
+            setHomeQuery(currentTranscript);
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn("Home speech recognition error:", event.error);
+          setIsHomeDictating(false);
+          if (event.error === "not-allowed") {
+            toast.error("Microphone permission denied.");
+          }
+        };
+
+        recognition.onend = () => {
+          setIsHomeDictating(false);
+        };
+
+        homeRecognitionRef.current = recognition;
+      } else {
+        setSpeechSupported(false);
+      }
+    }
+  }, []);
+
+  const toggleHomeDictate = () => {
+    if (!speechSupported) {
+      toast("Voice dictation is not supported in this browser.", { icon: "ℹ️" });
+      return;
+    }
+
+    if (isHomeDictating) {
+      homeRecognitionRef.current?.stop();
+      setIsHomeDictating(false);
+    } else {
+      try {
+        homeRecognitionRef.current?.start();
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+      }
+    }
+  };
+
+  // Submit query from Home chat bar -> opens Left Drawer in a fresh conversation
+  const handleHomeSubmit = (queryOverride?: string) => {
+    const q = (queryOverride || homeQuery).trim();
+    if (!q) return;
+
+    if (isHomeDictating) {
+      homeRecognitionRef.current?.stop();
+      setIsHomeDictating(false);
+    }
+
+    openDrawer({ query: q });
+    setHomeQuery("");
+  };
+
+  // Launch Go Live from Home -> opens Left Drawer in a fresh conversation and starts live session
+  const handleHomeGoLive = () => {
+    if (isHomeDictating) {
+      homeRecognitionRef.current?.stop();
+      setIsHomeDictating(false);
+    }
+    openDrawer({ startLive: true });
+  };
+
+  const reminders = useMemo(() => {
+    return computeGentleReminders({
+      products,
+      restockOrders,
+      stockMovements,
+      salesSlips,
+      shopCategory: shop?.category,
+    });
+  }, [products, restockOrders, stockMovements, salesSlips, shop?.category]);
+
+  const hero = (
+    <HomeHero
+      firstName={firstName}
+      query={homeQuery}
+      onQueryChange={setHomeQuery}
+      onSubmit={handleHomeSubmit}
+      onGoLive={handleHomeGoLive}
+      onDictate={toggleHomeDictate}
+      isDictating={isHomeDictating}
+      onOpenChat={() => openDrawer()}
+      chips={quickChips}
+    />
+  );
+
+  // Empty store state
   if (products.length === 0) {
     return (
-      <div className="space-y-6">
-        <div className="rounded-2xl border border-border bg-card p-6 sm:p-8 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5" />
-                Store Setup
-              </span>
-              <h2 className="font-heading text-2xl font-bold text-foreground">
-                Welcome, {profile?.full_name || "Owner"}!
-              </h2>
-              <p className="text-sm text-muted-foreground max-w-xl">
-                Your shop <span className="font-semibold text-foreground">&ldquo;{shop?.name}&rdquo;</span> is set up.
-                Add your first few products to start finding items and recording stock changes.
-              </p>
-            </div>
+      <div className="space-y-8">
+        {hero}
 
-            {shop && (
-              <AddProductDialog
-                shopId={shop.id}
-                defaultCategory={shop.category}
-                trigger={
-                  <Button className="h-11 px-5 font-semibold gap-2 shadow-sm cursor-pointer">
-                    <PlusCircle className="h-4 w-4" />
-                    <span>Add Your First Product</span>
-                  </Button>
-                }
-              />
-            )}
+        {/* Action card for empty state */}
+        <div className="flex flex-col items-center gap-5 rounded-3xl border border-dashed border-border bg-card/60 p-8 text-center sm:p-10">
+          <KoroFace size={72} tone="sky" />
+          <div className="space-y-2">
+            <h2 className="font-heading text-2xl font-bold text-foreground">No products yet</h2>
+            <p className="mx-auto max-w-md text-base text-muted-foreground">
+              Add your first few products, or tap the big mic and speak to set up your inventory automatically.
+            </p>
           </div>
-        </div>
-
-        {/* Voice Assistant even in empty state */}
-        <AssistantVoiceCard shop={shop} products={products} />
-
-        <div className="rounded-2xl border border-dashed border-border p-8 text-center space-y-3 bg-muted/10">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <PackageSearch className="h-6 w-6" />
-          </div>
-          <p className="text-base font-semibold text-foreground">No Products in Inventory Yet</p>
-          <p className="text-xs text-muted-foreground max-w-md mx-auto">
-            You do not need a full inventory on day one. Start by adding a few frequently requested items.
-          </p>
+          {shop && (
+            <AddProductDialog
+              shopId={shop.id}
+              defaultCategory={shop.category}
+              trigger={
+                <Button className="h-12 cursor-pointer gap-2 px-6 text-base font-semibold shadow-xs">
+                  <PlusCircle className="h-5 w-5" />
+                  <span>Add your first product</span>
+                </Button>
+              }
+            />
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="font-heading text-2xl font-bold text-foreground">
-          Welcome back, {profile?.full_name || "Owner"}!
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Quick summary of your store inventory and item counts.
-        </p>
-      </div>
+    <div className="space-y-10">
+      {hero}
 
-      {/* Voice-First Assistant Card on Home Page */}
-      <AssistantVoiceCard shop={shop} products={products} />
-
-      <InventoryStats products={products} />
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-heading text-lg font-bold text-foreground">Store Inventory</h3>
-            <p className="text-xs text-muted-foreground">Search and review product locations and stock levels.</p>
-          </div>
-        </div>
-
-        <InventoryTable products={products} />
-      </div>
+      {/* Reminders */}
+      <HomeRemindersFeed reminders={reminders} onNavigateTab={setActiveTab} />
     </div>
   );
 }

@@ -8,6 +8,8 @@ import type {
   Product,
   RestockOrder,
   RestockOrderItemRow,
+  StockMovement,
+  SalesSlip,
 } from "@/lib/supabase/types";
 
 export const instant = false;
@@ -78,8 +80,8 @@ export default async function DashboardPage() {
     redirect("/onboarding");
   }
 
-  // Fetch shop products and restock data in parallel
-  const [productsRes, restockOrdersRes, restockItemsRes] = await Promise.all([
+  // Fetch shop products, restock data, stock movements and sales slips in parallel (strictly scoped to activeShop.id)
+  const [productsRes, restockOrdersRes, restockItemsRes, movementsRes, salesRes] = await Promise.all([
     supabase
       .from("products")
       .select("*")
@@ -93,11 +95,23 @@ export default async function DashboardPage() {
       .select("*")
       .eq("shop_id", activeShop.id)
       .order("created_at", { ascending: false }),
+    (supabase.from("stock_movements") as any)
+      .select("*")
+      .eq("shop_id", activeShop.id)
+      .order("created_at", { ascending: false })
+      .limit(15),
+    (supabase.from("sales_slips") as any)
+      .select("*")
+      .eq("shop_id", activeShop.id)
+      .order("created_at", { ascending: false })
+      .limit(15),
   ]);
 
   const products = (productsRes.data as unknown as Product[]) ?? [];
   const restockOrders = (restockOrdersRes.data as unknown as RestockOrder[]) ?? [];
   const restockOrderItems = (restockItemsRes.data as unknown as RestockOrderItemRow[]) ?? [];
+  const stockMovements = (movementsRes.data as unknown as StockMovement[]) ?? [];
+  const salesSlips = (salesRes.data as unknown as SalesSlip[]) ?? [];
 
   return (
     <DashboardShell
@@ -106,6 +120,8 @@ export default async function DashboardPage() {
       products={products}
       restockOrders={restockOrders}
       restockOrderItems={restockOrderItems}
+      stockMovements={stockMovements}
+      salesSlips={salesSlips}
     />
   );
 }

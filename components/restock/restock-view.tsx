@@ -26,11 +26,16 @@ export function RestockView({
   initialOrders = [],
   initialItems = [],
 }: RestockViewProps) {
+  const [allProducts, setAllProducts] = useState<Product[]>(products);
   const [orders, setOrders] = useState<RestockOrder[]>(initialOrders);
   const [items, setItems] = useState<RestockOrderItemRow[]>(initialItems);
 
   const activeSubTab = useRestockStore((s) => s.activeSubTab);
   const setActiveSubTab = useRestockStore((s) => s.setActiveSubTab);
+
+  useEffect(() => {
+    setAllProducts(products);
+  }, [products]);
 
   useEffect(() => {
     setOrders(initialOrders);
@@ -39,6 +44,13 @@ export function RestockView({
   useEffect(() => {
     setItems(initialItems);
   }, [initialItems]);
+
+  const handleProductAdded = (newProduct: Product) => {
+    setAllProducts((prev) => {
+      if (prev.some((p) => p.id === newProduct.id)) return prev;
+      return [newProduct, ...prev];
+    });
+  };
 
   const pendingOrdersCount = orders.filter((o) => o.status === "ordered").length;
 
@@ -97,7 +109,7 @@ export function RestockView({
       {activeSubTab === "draft" ? (
         <>
           {/* Summary KPI Cards */}
-          <RestockStats products={products} />
+          <RestockStats products={allProducts} />
 
           {/* 2-Column Responsive Workspace */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -111,7 +123,14 @@ export function RestockView({
                   Items are filtered based on stock threshold. When orders are placed, slips and Record Arrival buttons stay attached to each row.
                 </p>
               </div>
-              <RestockProductList products={products} orders={orders} items={items} />
+              <RestockProductList
+                products={allProducts}
+                orders={orders}
+                items={items}
+                shopId={shop?.id || null}
+                shopCategory={shop?.category}
+                onProductAdded={handleProductAdded}
+              />
             </div>
 
             {/* Right: Live Purchase Order Draft */}
@@ -124,13 +143,13 @@ export function RestockView({
                   Review quantities, share on WhatsApp, or copy. Order slips are automatically created and tracked.
                 </p>
               </div>
-              <RestockPurchaseList shop={shop} />
+              <RestockPurchaseList shop={shop} onProductAdded={handleProductAdded} />
             </div>
           </div>
         </>
       ) : (
         /* Full Restock History View */
-        <RestockHistoryView products={products} orders={orders} items={items} />
+        <RestockHistoryView products={allProducts} orders={orders} items={items} />
       )}
 
       {/* Bulk Stock Arrival Dialog (from draft) */}

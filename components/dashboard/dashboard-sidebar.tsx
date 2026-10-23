@@ -5,28 +5,20 @@ import {
   SidebarHeader,
   SidebarContent,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarGroupContent,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuBadge,
   SidebarFooter,
-  SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/landing/theme-toggle";
+import { KoroFace } from "@/components/brand/koro-face";
 import { useDashboardNav, type DashboardTab } from "@/lib/hooks/use-dashboard-nav";
 import type { Shop, Profile, Product } from "@/lib/supabase/types";
-import {
-  Home,
-  Package,
-  ReceiptText,
-  RefreshCw,
-  Store,
-  LogOut,
-  User,
-  Tag,
-} from "lucide-react";
+import { Home, Package, ReceiptText, RefreshCw, MessageSquare, LogOut } from "lucide-react";
+import { cn } from "cn";
 
 interface DashboardSidebarProps {
   shop: Shop | null;
@@ -36,6 +28,8 @@ interface DashboardSidebarProps {
 
 export function DashboardSidebar({ shop, profile, products }: DashboardSidebarProps) {
   const { activeTab, setActiveTab, handleSignOut } = useDashboardNav();
+  const { state } = useSidebar();
+  const isCollapsed = state === "collapsed";
 
   const lowStockCount = products.filter(
     (p) => p.stock_status === "low_stock" || p.stock_status === "out_of_stock"
@@ -52,52 +46,80 @@ export function DashboardSidebar({ shop, profile, products }: DashboardSidebarPr
       badge: lowStockCount > 0 ? lowStockCount : undefined,
       badgeVariant: "destructive" as const,
     },
+    { id: "chats" as DashboardTab, label: "Chats", icon: MessageSquare },
   ];
+
+  const ownerName = profile?.full_name || "Owner";
+  const initial = ownerName.trim().charAt(0).toUpperCase() || "O";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
-      {/* Brand & Store Header */}
-      <SidebarHeader className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-xs">
-            <Store className="h-5 w-5" />
-          </div>
-          <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
-            <span className="font-heading font-bold text-sm text-sidebar-foreground truncate">
-              {shop?.name || "Retail Shop"}
-            </span>
-            <span className="text-[11px] text-muted-foreground flex items-center gap-1 truncate">
-              <Tag className="h-3 w-3 shrink-0" />
-              {shop?.category || "Store"}
-            </span>
-          </div>
+      {/* Brand header: same height as the top bar so the lines meet */}
+      <SidebarHeader
+        className={cn(
+          "h-16 shrink-0 justify-center border-b border-sidebar-border py-0 transition-all",
+          isCollapsed ? "items-center px-0" : "px-4"
+        )}
+      >
+        <div className={cn("flex min-w-0 items-center", isCollapsed ? "justify-center" : "gap-3")}>
+          <KoroFace size={40} tone="marigold" className="shrink-0" />
+          {!isCollapsed && (
+            <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
+              <span className="font-heading text-lg font-bold leading-tight text-sidebar-foreground">Koro</span>
+              <span
+                className="truncate text-sm leading-tight text-muted-foreground"
+                title={shop?.category ? `${shop?.name} \u00b7 ${shop.category}` : shop?.name}
+              >
+                {shop?.name || "Your shop"}
+              </span>
+            </div>
+          )}
         </div>
       </SidebarHeader>
 
-      {/* Navigation Menu */}
-      <SidebarContent className="p-2">
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Main Menu
-          </SidebarGroupLabel>
+      {/* Navigation */}
+      <SidebarContent className={cn("py-4", isCollapsed ? "px-0" : "px-3")}>
+        <SidebarGroup className={cn("p-0", isCollapsed ? "items-center" : "")}>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className={cn("gap-1.5", isCollapsed ? "items-center" : "")}>
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
                 return (
-                  <SidebarMenuItem key={item.id}>
+                  <SidebarMenuItem
+                    key={item.id}
+                    className={cn(
+                      "transition-all",
+                      isCollapsed ? "flex justify-center" : "w-full"
+                    )}
+                  >
                     <SidebarMenuButton
+                      size="lg"
                       isActive={isActive}
                       onClick={() => setActiveTab(item.id)}
                       tooltip={item.label}
-                      className="gap-3 font-medium text-xs h-9 cursor-pointer"
+                      className={cn(
+                        "cursor-pointer rounded-xl text-base font-medium transition-all data-active:font-semibold",
+                        isCollapsed
+                          ? "size-12! justify-center p-0!"
+                          : "h-12 w-full gap-3 px-3.5"
+                      )}
                     >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      <span>{item.label}</span>
+                      <Icon className="size-5 shrink-0" />
+                      {!isCollapsed && (
+                        <span className="truncate group-data-[collapsible=icon]:hidden">
+                          {item.label}
+                        </span>
+                      )}
                     </SidebarMenuButton>
-                    {item.badge !== undefined && (
-                      <SidebarMenuBadge className={item.badgeVariant === "destructive" ? "bg-destructive/15 text-destructive font-semibold" : ""}>
+                    {!isCollapsed && item.badge !== undefined && (
+                      <SidebarMenuBadge
+                        className={
+                          item.badgeVariant === "destructive"
+                            ? "top-1/2! right-3 h-6 min-w-6 -translate-y-1/2 rounded-full bg-destructive/15 text-sm font-semibold text-destructive group-data-[collapsible=icon]:hidden"
+                            : "top-1/2! right-3 h-6 min-w-6 -translate-y-1/2 rounded-full bg-muted text-sm group-data-[collapsible=icon]:hidden"
+                        }
+                      >
                         {item.badge}
                       </SidebarMenuBadge>
                     )}
@@ -109,40 +131,55 @@ export function DashboardSidebar({ shop, profile, products }: DashboardSidebarPr
         </SidebarGroup>
       </SidebarContent>
 
-      {/* Footer: User Details, Theme Toggle, Sign Out */}
-      <SidebarFooter className="p-3 border-t border-sidebar-border space-y-2">
-        <div className="flex items-center justify-between px-1 group-data-[collapsible=icon]:justify-center">
-          <span className="text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-            Theme Mode
-          </span>
+      {/* Footer: theme, profile, sign out */}
+      <SidebarFooter className={cn("gap-3 p-3", isCollapsed ? "items-center px-0" : "")}>
+        <div
+          className={cn(
+            "flex items-center",
+            isCollapsed ? "justify-center px-0" : "justify-between px-2"
+          )}
+        >
+          {!isCollapsed && (
+            <span className="text-base font-medium text-sidebar-foreground group-data-[collapsible=icon]:hidden">
+              Dark mode
+            </span>
+          )}
           <ThemeToggle />
         </div>
 
-        <SidebarSeparator />
-
-        <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-sidebar-accent/50">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              <User className="h-4 w-4" />
-            </div>
-            <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
-              <span className="text-xs font-semibold text-sidebar-foreground truncate">
-                {profile?.full_name || "Owner"}
+        <div
+          className={cn(
+            "flex items-center rounded-2xl transition-all",
+            isCollapsed
+              ? "flex-col bg-transparent p-0 gap-2 items-center"
+              : "gap-3 bg-sidebar-accent/60 p-2"
+          )}
+        >
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ffb110] text-base font-bold text-black"
+            aria-hidden="true"
+          >
+            {initial}
+          </div>
+          {!isCollapsed && (
+            <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
+              <span className="truncate text-base font-semibold leading-tight text-sidebar-foreground">
+                {ownerName}
               </span>
-              <span className="text-[10px] text-muted-foreground truncate">
+              <span className="truncate text-sm leading-tight text-muted-foreground">
                 {profile?.email || ""}
               </span>
             </div>
-          </div>
+          )}
 
           <button
             type="button"
             onClick={handleSignOut}
             title="Sign out"
             aria-label="Sign out"
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors group-data-[collapsible=icon]:hidden cursor-pointer"
+            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="size-5" />
           </button>
         </div>
       </SidebarFooter>

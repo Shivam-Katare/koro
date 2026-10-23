@@ -51,6 +51,7 @@ interface RestockState {
 
   // Actions
   toggleProduct: (product: Product) => void;
+  addCustomProductToOrder: (product: Product, quantity: number) => void;
   setQuantity: (productId: string, quantity: number) => void;
   removeProduct: (productId: string) => void;
   selectAllLowStock: (products: Product[]) => void;
@@ -119,6 +120,18 @@ export const useRestockStore = create<RestockState>((set, get) => ({
         },
       });
     }
+  },
+
+  addCustomProductToOrder: (product: Product, quantity: number) => {
+    const current = get().orderItems;
+    const existing = current[product.id];
+    const newQty = existing ? existing.quantity + quantity : Math.max(1, Math.floor(quantity) || 1);
+    set({
+      orderItems: {
+        ...current,
+        [product.id]: { product, quantity: newQty },
+      },
+    });
   },
 
   setQuantity: (productId: string, quantity: number) => {

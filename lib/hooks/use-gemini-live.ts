@@ -30,10 +30,17 @@ export interface LiveMessage {
 
 interface UseGeminiLiveOptions {
   shopId: string | null;
+  conversationId?: string | null;
   onStockAdjustmentProposed?: (action: any) => void;
+  onTurnComplete?: (turn: { userText?: string; assistantText?: string; pendingAction?: any }) => void;
 }
 
-export function useGeminiLive({ shopId, onStockAdjustmentProposed }: UseGeminiLiveOptions) {
+export function useGeminiLive({
+  shopId,
+  conversationId,
+  onStockAdjustmentProposed,
+  onTurnComplete,
+}: UseGeminiLiveOptions) {
   const [status, setStatus] = useState<LiveStatus>("idle");
   const [isLive, setIsLive] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -78,6 +85,10 @@ export function useGeminiLive({ shopId, onStockAdjustmentProposed }: UseGeminiLi
     setIsLive(false);
     setMicVolume(0);
     setAssistantVolume(0);
+    setUserTranscript("");
+    setAssistantTranscript("");
+    lastUserTextRef.current = "";
+    lastAssistantTextRef.current = "";
   }, []);
 
   const startSession = useCallback(async () => {
@@ -213,6 +224,8 @@ export function useGeminiLive({ shopId, onStockAdjustmentProposed }: UseGeminiLi
               if (serverContent.interrupted) {
                 player.stop();
                 setStatus("listening");
+                setAssistantTranscript("");
+                lastAssistantTextRef.current = "";
               }
 
               // Live User Transcription (Interim or Final)
@@ -280,14 +293,25 @@ export function useGeminiLive({ shopId, onStockAdjustmentProposed }: UseGeminiLi
                   // Persist to Supabase assistant_messages
                   saveLiveTurnAction({
                     shopId,
+                    conversationId: conversationId || undefined,
                     userText,
                     assistantText,
                     pendingAction,
                   });
 
-                  // Reset active sentence captions for next turn
+                  if (onTurnComplete) {
+                    onTurnComplete({
+                      userText,
+                      assistantText,
+                      pendingAction,
+                    });
+                  }
+
+                  // Reset active sentence captions for next turn (prevents duplicate messages)
                   lastUserTextRef.current = "";
                   lastAssistantTextRef.current = "";
+                  setUserTranscript("");
+                  setAssistantTranscript("");
                 }
               }
             }

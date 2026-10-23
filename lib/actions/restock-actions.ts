@@ -7,13 +7,15 @@ import {
   recordItemArrivalSchema,
   cancelRestockOrderSchema,
   deleteRestockOrderSchema,
+  quickAddRestockItemSchema,
   type RecordRestockArrivalInput,
   type CreateRestockOrderInput,
   type RecordItemArrivalInput,
   type CancelRestockOrderInput,
   type DeleteRestockOrderInput,
+  type QuickAddRestockItemInput,
 } from "@/lib/validations/restock";
-import type { RestockOrder, RestockOrderItemRow } from "@/lib/supabase/types";
+import type { RestockOrder, RestockOrderItemRow, Product } from "@/lib/supabase/types";
 import { revalidatePath } from "next/cache";
 
 export async function createRestockOrderAction(input: CreateRestockOrderInput) {
@@ -371,3 +373,97 @@ export async function deleteRestockOrderAction(input: DeleteRestockOrderInput) {
     return { success: false, error: errorMsg };
   }
 }
+
+export async function quickAddRestockItemAction(input: QuickAddRestockItemInput): Promise<{
+  success: boolean;
+  product?: Product;
+  quantity?: number;
+  isNew?: boolean;
+  error?: string;
+}> {
+  const parseResult = quickAddRestockItemSchema.safeParse(input);
+  if (!parseResult.success) {
+    return {
+      success: false,
+      error: parseResult.error.issues[0]?.message || "Invalid item details",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Please sign in to add items" };
+  }
+
+  const { shopId, name, quantity, brand, category, notes } = parseResult.data;
+
+  try {
+    // 1. Check if a product with this exact name already exists in this shop
+    const { data: existing, error: searchErr } = await (supabase
+      .from("products") as any)
+      .select("*")
+      .eq("shop_id", shopId)
+      .ilike("name", name.trim())
+      .limit(1);
+
+    if (!searchErr && existing && existing.length > 0) {
+      return {
+        success: true,
+        product: existing[0] as Product,
+        quantity,
+        isNew: false,
+      };
+    }
+
+    // 2. Fetch the shop to determine fallback category if not provided
+    let finalCategory = category?.trim();
+    if (!finalCategory) {
+      const { data: shop } = await (supabase.from("shops") as any)
+        .select("category")
+        .eq("id", shopId)
+        .single();
+      finalCategory = shop?.category || "General Store";
+    }
+
+    // 3. Create the product via create_product_with_stock with 0 opening stock
+    const { data: createdProduct, error: createErr } = await (supabase as any).rpc(
+      "create_product_with_stock",
+      {
+        p_shop_id: shopId,
+        p_name: name.trim(),
+        p_category: finalCategory,
+        p_opening_stock: 0,
+        p_brand: brand?.trim() || null,
+        p_barcode: null,
+        p_selling_price: null,
+        p_cost_price: null,
+        p_min_stock_threshold: 5,
+        p_storage_location: null,
+        p_attributes: {},
+        p_description: notes?.trim()
+          ? `Trending / New restock item: ${notes.trim()}`
+          : "Trending / New item added from Restock slip",
+      }
+    );
+
+    if (createErr || !createdProduct) {
+      throw new Error(createErr?.message || "Failed to create product for restock");
+    }
+
+    revalidatePath("/dashboard");
+    return {
+      success: true,
+      product: createdProduct as Product,
+      quantity,
+      isNew: true,
+    };
+  } catch (err: unknown) {
+    const errorMsg =
+      err instanceof Error ? err.message : "Failed to add restock item";
+    return { success: false, error: errorMsg };
+  }
+}
+

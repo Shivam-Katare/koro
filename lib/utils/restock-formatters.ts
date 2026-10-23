@@ -58,9 +58,17 @@ export function buildWhatsAppRestockMessage({
 
     const details = detailsList.length > 0 ? ` (${detailsList.join(" | ")})` : "";
     const minThreshold = p.min_stock_threshold ?? 5;
+    const isNewItem =
+      p.current_stock === 0 &&
+      (p.description?.toLowerCase().includes("trending") ||
+        p.description?.toLowerCase().includes("restock"));
+
+    const stockInfo = isNewItem
+      ? `✨ New Item | Current: 0`
+      : `Current: ${p.current_stock} | Min: ${minThreshold}`;
 
     lines.push(
-      `${index + 1}. *${p.name}*${details}\n   👉 *Order: ${item.quantity} units* (Current: ${p.current_stock} | Min: ${minThreshold})`
+      `${index + 1}. *${p.name}*${details}\n   👉 *Order: ${item.quantity} units* (${stockInfo})`
     );
   });
 

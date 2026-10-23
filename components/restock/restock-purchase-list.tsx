@@ -20,15 +20,21 @@ import {
   RotateCcw,
   CheckCheck,
   Loader2,
+  Sparkles,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { RestockAddTrendingDialog } from "./restock-add-trending-dialog";
+import type { Product } from "@/lib/supabase/types";
 import toast from "react-hot-toast";
 
 interface RestockPurchaseListProps {
   shop: Shop | null;
+  onProductAdded?: (product: Product) => void;
 }
 
-export function RestockPurchaseList({ shop }: RestockPurchaseListProps) {
+export function RestockPurchaseList({ shop, onProductAdded }: RestockPurchaseListProps) {
   const router = useRouter();
+  const [isAddTrendingOpen, setIsAddTrendingOpen] = useState(false);
   const orderItems = useRestockStore((s) => s.orderItems);
   const distributorName = useRestockStore((s) => s.distributorName);
   const notes = useRestockStore((s) => s.notes);
@@ -181,61 +187,109 @@ export function RestockPurchaseList({ shop }: RestockPurchaseListProps) {
 
   if (items.length === 0) {
     return (
-      <Card className="border-border shadow-xs">
-        <CardHeader className="pb-3 border-b border-border">
-          <CardTitle className="text-base font-heading font-bold flex items-center justify-between">
-            <span>Purchase List</span>
-            <span className="text-xs font-normal text-muted-foreground">0 items</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-8 text-center space-y-2">
-          <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto text-muted-foreground">
-            <ShoppingCart className="h-6 w-6" />
-          </div>
-          <p className="text-sm font-semibold text-foreground">Purchase List is Empty</p>
-          <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-            Select products from the depleted list on the left to prepare an order for your distributor.
-          </p>
-        </CardContent>
-      </Card>
+      <>
+        <Card className="border-border shadow-xs">
+          <CardHeader className="pb-3 border-b border-border">
+            <CardTitle className="text-base font-heading font-bold flex items-center justify-between">
+              <span>Purchase List</span>
+              <span className="text-xs font-normal text-muted-foreground">0 items</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-8 text-center space-y-3">
+            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto text-muted-foreground">
+              <ShoppingCart className="h-6 w-6" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">Purchase List is Empty</p>
+            <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+              Select products from the depleted list on the left or add a new trending market item directly.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsAddTrendingOpen(true)}
+              className="h-8 text-xs font-semibold gap-1.5 border-dashed border-primary/40 text-primary hover:bg-primary/5 cursor-pointer mt-1"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span>+ Order New / Trending Item</span>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <RestockAddTrendingDialog
+          shopId={shop?.id || null}
+          shopCategory={shop?.category}
+          open={isAddTrendingOpen}
+          onOpenChange={setIsAddTrendingOpen}
+          onItemAdded={onProductAdded}
+        />
+      </>
     );
   }
 
   return (
-    <Card className="border-border shadow-xs flex flex-col">
-      <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between space-y-0">
-        <div>
-          <CardTitle className="text-base font-heading font-bold">Purchase List</CardTitle>
-          <p className="text-[11px] text-muted-foreground">
-            {items.length} product{items.length > 1 ? "s" : ""} • {totalUnits} total units
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          onClick={clearOrder}
-          disabled={isProcessing}
-          className="text-xs text-muted-foreground hover:text-destructive gap-1 cursor-pointer"
-        >
-          <RotateCcw className="h-3 w-3" />
-          <span>Clear</span>
-        </Button>
-      </CardHeader>
-
-      <CardContent className="p-4 space-y-4 flex-1">
-        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-          {items.map(({ product, quantity }) => (
-            <div
-              key={product.id}
-              className="p-2.5 rounded-lg border border-border bg-muted/20 flex items-center justify-between gap-2 text-xs"
+    <>
+      <Card className="border-border shadow-xs flex flex-col">
+        <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base font-heading font-bold">Purchase List</CardTitle>
+            <p className="text-[11px] text-muted-foreground">
+              {items.length} product{items.length > 1 ? "s" : ""} • {totalUnits} total units
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => setIsAddTrendingOpen(true)}
+              disabled={isProcessing}
+              className="text-xs text-primary hover:text-primary hover:bg-primary/10 gap-1 cursor-pointer font-medium"
+              title="Add a new or trending item to this order slip"
             >
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-foreground truncate">{product.name}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  In stock: {product.current_stock} • Min: {product.min_stock_threshold ?? 5}
-                </p>
-              </div>
+              <Sparkles className="h-3 w-3" />
+              <span>+ Add Item</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={clearOrder}
+              disabled={isProcessing}
+              className="text-xs text-muted-foreground hover:text-destructive gap-1 cursor-pointer"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Clear</span>
+            </Button>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-4 space-y-4 flex-1">
+          <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+            {items.map(({ product, quantity }) => (
+              <div
+                key={product.id}
+                className="p-2.5 rounded-lg border border-border bg-muted/20 flex items-center justify-between gap-2 text-xs"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-semibold text-foreground truncate">{product.name}</p>
+                    {product.current_stock === 0 &&
+                      (product.description?.toLowerCase().includes("trending") ||
+                        product.description?.toLowerCase().includes("restock")) && (
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] py-0 px-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold gap-0.5 shrink-0"
+                        >
+                          <Sparkles className="h-2 w-2" />
+                          New
+                        </Badge>
+                      )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    In stock: {product.current_stock} • Min: {product.min_stock_threshold ?? 5}
+                  </p>
+                </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
                 <div className="flex items-center border border-border rounded-md bg-background overflow-hidden h-7">
@@ -364,5 +418,14 @@ export function RestockPurchaseList({ shop }: RestockPurchaseListProps) {
         </div>
       </CardFooter>
     </Card>
+
+    <RestockAddTrendingDialog
+      shopId={shop?.id || null}
+      shopCategory={shop?.category}
+      open={isAddTrendingOpen}
+      onOpenChange={setIsAddTrendingOpen}
+      onItemAdded={onProductAdded}
+    />
+  </>
   );
 }

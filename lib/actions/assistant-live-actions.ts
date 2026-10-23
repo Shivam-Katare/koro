@@ -370,12 +370,13 @@ export async function executeLiveToolCallAction(input: {
 
 export async function saveLiveTurnAction(input: {
   shopId: string;
+  conversationId?: string;
   userText?: string;
   assistantText?: string;
   taskType?: string;
   pendingAction?: any;
 }) {
-  const { shopId, userText, assistantText, taskType, pendingAction } = input;
+  const { shopId, conversationId, userText, assistantText, taskType, pendingAction } = input;
   if (!shopId) return { success: false };
 
   const supabase = await createClient();
@@ -393,6 +394,10 @@ export async function saveLiveTurnAction(input: {
         role: "user",
         content: userText.trim(),
         task_type: "general",
+        metadata: {
+          conversationId: conversationId || null,
+          liveSession: true,
+        },
       });
     }
 
@@ -404,6 +409,7 @@ export async function saveLiveTurnAction(input: {
         content: assistantText.trim(),
         task_type: taskType || "general",
         metadata: {
+          conversationId: conversationId || null,
           liveSession: true,
           pendingAction: pendingAction || null,
         },

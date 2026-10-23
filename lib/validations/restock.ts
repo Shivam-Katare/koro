@@ -50,7 +50,24 @@ export const deleteRestockOrderSchema = z.object({
   orderId: z.string().uuid("Invalid order ID"),
 });
 
+export const quickAddRestockItemSchema = z.object({
+  shopId: z.string().uuid("Invalid shop ID"),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Item name must be at least 2 characters")
+    .max(150, "Item name is too long"),
+  quantity: z
+    .number()
+    .int("Quantity must be a whole number")
+    .min(1, "Order quantity must be at least 1"),
+  brand: z.string().trim().max(80).optional().or(z.literal("")),
+  category: z.string().trim().optional().or(z.literal("")),
+  notes: z.string().trim().max(250).optional().or(z.literal("")),
+});
+
 export type CreateRestockOrderInput = z.infer<typeof createRestockOrderSchema>;
 export type RecordItemArrivalInput = z.infer<typeof recordItemArrivalSchema>;
 export type CancelRestockOrderInput = z.infer<typeof cancelRestockOrderSchema>;
 export type DeleteRestockOrderInput = z.infer<typeof deleteRestockOrderSchema>;
+export type QuickAddRestockItemInput = z.infer<typeof quickAddRestockItemSchema>;

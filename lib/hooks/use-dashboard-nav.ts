@@ -5,7 +5,7 @@ import { useCallback } from "react";
 import { useAuthStore } from "@/lib/store/use-auth-store";
 import toast from "react-hot-toast";
 
-export type DashboardTab = "home" | "products" | "sales" | "restock" | "settings";
+export type DashboardTab = "home" | "products" | "sales" | "restock" | "chats" | "settings";
 
 export function useDashboardNav() {
   const searchParams = useSearchParams();
@@ -18,6 +18,7 @@ export function useDashboardNav() {
     rawTab === "products" ||
     rawTab === "sales" ||
     rawTab === "restock" ||
+    rawTab === "chats" ||
     rawTab === "settings"
       ? rawTab
       : "home";

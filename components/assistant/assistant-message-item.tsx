@@ -2,7 +2,8 @@
 
 import React from "react";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, Package, AlertTriangle, IndianRupee, CheckCircle2 } from "lucide-react";
+import { KoroFace } from "@/components/brand/koro-face";
+import { MapPin, Package, AlertTriangle, IndianRupee } from "lucide-react";
 
 interface AssistantMessageItemProps {
   role: "user" | "assistant" | "system";
@@ -11,9 +12,14 @@ interface AssistantMessageItemProps {
   structuredData?: any;
 }
 
+// Emoji are never shown in the UI; icons are used instead (message text may still contain them)
+const EMOJI_PATTERN = /[\u2600-\u27BF\uFE0F\u200D]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF]/g;
+
 // Format markdown bold (**text**) into real <strong> tags so shopkeeper never sees raw asterisks
 function formatContent(text: string) {
-  const parts = text.split(/(\*\*.*?\*\*)/g);
+  // const parts = text.replace(EMOJI_PATTERN, "").trim().split(/(\*\*.*?\*\*)/g);
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+
   return parts.map((part, index) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return (
@@ -37,7 +43,7 @@ export function AssistantMessageItem({
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-xs bg-primary text-primary-foreground px-4 py-2.5 text-xs sm:text-sm font-medium shadow-xs">
+        <div className="max-w-[85%] rounded-3xl rounded-br-lg bg-primary px-4 py-3 text-base leading-relaxed text-primary-foreground">
           {content}
         </div>
       </div>
@@ -45,10 +51,11 @@ export function AssistantMessageItem({
   }
 
   return (
-    <div className="flex justify-start space-y-1.5 w-full">
-      <div className="max-w-[92%] sm:max-w-[85%] rounded-2xl rounded-tl-xs bg-muted/60 border border-border/80 px-4 py-3 text-xs sm:text-sm text-foreground shadow-2xs space-y-2">
+    <div className="flex w-full items-start justify-start gap-2.5">
+      <KoroFace size={32} tone="marigold" className="mt-0.5 shrink-0" />
+      <div className="min-w-0 max-w-[88%] space-y-2 rounded-3xl rounded-tl-lg bg-muted px-4 py-3 text-base text-foreground">
         {/* Main Clean Formatted Text */}
-        <div className="leading-relaxed whitespace-pre-line text-xs sm:text-sm">
+        <div className="whitespace-pre-line text-base leading-relaxed">
           {formatContent(content)}
         </div>
 

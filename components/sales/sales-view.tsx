@@ -5,6 +5,7 @@ import { useSalesStore } from "@/lib/store/use-sales-store";
 import { SalesQuickCatalog } from "./sales-quick-catalog";
 import { SalesReviewScreen } from "./sales-review-screen";
 import { SalesHistoryView } from "./sales-history-view";
+import { SalesSlipScannerDialog } from "./sales-slip-scanner-dialog";
 import { ShoppingBag, History, Sparkles } from "lucide-react";
 
 interface SalesViewProps {
@@ -30,8 +31,13 @@ export function SalesView({ shop, products }: SalesViewProps) {
           </p>
         </div>
 
-        {/* View Mode Toggle: Counter vs History */}
-        <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border text-xs self-start sm:self-auto">
+        {/* Action Buttons & View Mode Toggle */}
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+          {/* Scan Bill / Slip Dialog */}
+          <SalesSlipScannerDialog shopId={shop?.id || null} />
+
+          {/* View Mode Toggle: Counter vs History */}
+          <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border text-xs">
           <button
             type="button"
             onClick={() => setActiveSubView("counter")}
@@ -64,6 +70,7 @@ export function SalesView({ shop, products }: SalesViewProps) {
           </button>
         </div>
       </div>
+    </div>
 
       {/* Main Content Area */}
       {activeSubView === "counter" ? (

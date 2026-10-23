@@ -35,6 +35,7 @@ interface SalesState {
   setRecentSlips: (slips: any[]) => void;
   setSelectedSlipForDetail: (slip: any | null) => void;
   setIsSubmitting: (loading: boolean) => void;
+  addExtractedLines: (lines: SaleDraftLine[]) => void;
 }
 
 function generateSlipNumber(): string {
@@ -161,4 +162,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
   setRecentSlips: (recentSlips: any[]) => set({ recentSlips }),
   setSelectedSlipForDetail: (selectedSlipForDetail: any | null) => set({ selectedSlipForDetail }),
   setIsSubmitting: (isSubmitting: boolean) => set({ isSubmitting }),
+  addExtractedLines: (newLines: SaleDraftLine[]) => {
+    set({ lines: [...get().lines, ...newLines] });
+  },
 }));
