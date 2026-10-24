@@ -222,11 +222,19 @@ export function AssistantChatDrawer({
       loadConversations();
     },
     onStockAdjustmentProposed: (action) => {
+      let promptText = `Maine **${action.productName}** ke liye details taiyaar ki hain. Kripya niche confirm karein:`;
+      if (action.actionType === "delete_product") {
+        promptText = `⚠️ **${action.productName}** ko delete karne ke liye confirmation chahiye. Niche review karein:`;
+      } else if (action.actionType === "record_sale") {
+        promptText = `**${action.productName}** ka sale record karne aur stock deduct karne ke liye details taiyaar hain:`;
+      } else if (action.actionType === "record_order_arrival") {
+        promptText = `**${action.productName}** ka stock delivery arrival record karne ke liye details taiyaar hain:`;
+      }
       setActiveMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `Maine **${action.productName}** ke liye details taiyaar ki hain. Kripya niche confirm karein:`,
+          content: promptText,
           pendingAction: action,
         },
       ]);

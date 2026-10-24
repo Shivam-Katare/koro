@@ -2,11 +2,12 @@
 
 import type { Shop, Product } from "@/lib/supabase/types";
 import { useSalesStore } from "@/lib/store/use-sales-store";
+import { SalesStats } from "./sales-stats";
 import { SalesQuickCatalog } from "./sales-quick-catalog";
 import { SalesReviewScreen } from "./sales-review-screen";
 import { SalesHistoryView } from "./sales-history-view";
 import { SalesSlipScannerDialog } from "./sales-slip-scanner-dialog";
-import { ShoppingBag, History, Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface SalesViewProps {
   shop: Shop | null;
@@ -18,91 +19,89 @@ export function SalesView({ shop, products }: SalesViewProps) {
   const setActiveSubView = useSalesStore((s) => s.setActiveSubView);
   const lines = useSalesStore((s) => s.lines);
 
+  const tabClass = (active: boolean) =>
+    cn(
+      "inline-flex h-9 sm:h-10 cursor-pointer items-center gap-1.5 sm:gap-2 rounded-full px-3.5 sm:px-4.5 text-xs sm:text-sm font-semibold transition-colors",
+      active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+    );
+
   return (
-    <div className="space-y-6">
-      {/* Header and Sub-Tab Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="font-heading text-2xl font-bold text-foreground">
-            Counter Sales &amp; Stock Deduction
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Deduct counter sales with live Before &amp; After preview. Review previous slips to verify deductions.
+    <div className="space-y-8">
+      {/* Title and Header Actions */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="space-y-1.5">
+          <h1 className="font-heading text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+            Counter Sales
+          </h1>
+          <p className="text-base text-muted-foreground sm:text-lg">
+            Record counter sales, deduct stock instantly, and review past slips.
           </p>
         </div>
 
-        {/* Action Buttons & View Mode Toggle */}
+        {/* Action Buttons & Sub-View Switcher */}
         <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
-          {/* Scan Bill / Slip Dialog */}
+          {/* Bill / Slip Scanner Dialog */}
           <SalesSlipScannerDialog shopId={shop?.id || null} />
 
-          {/* View Mode Toggle: Counter vs History */}
-          <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border text-xs">
-          <button
-            type="button"
-            onClick={() => setActiveSubView("counter")}
-            className={`px-3.5 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeSubView === "counter"
-                ? "bg-background text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <ShoppingBag className="h-3.5 w-3.5 text-primary" />
-            <span>Counter Sale</span>
-            {lines.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-primary text-primary-foreground text-[10px]">
-                {lines.length}
-              </span>
-            )}
-          </button>
+          {/* Mode Switcher */}
+          <div className="flex shrink-0 items-center rounded-full bg-muted p-1">
+            <button
+              type="button"
+              onClick={() => setActiveSubView("counter")}
+              className={tabClass(activeSubView === "counter")}
+            >
+              <span>Counter sale</span>
+              {lines.length > 0 && (
+                <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground tabular-nums">
+                  {lines.length}
+                </span>
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveSubView("history")}
-            className={`px-3.5 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeSubView === "history"
-                ? "bg-background text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <History className="h-3.5 w-3.5" />
-            <span>Slip History</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubView("history")}
+              className={tabClass(activeSubView === "history")}
+            >
+              <span>Past slips</span>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* KPI Stats Bar */}
+      <SalesStats products={products} />
 
       {/* Main Content Area */}
       {activeSubView === "counter" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
           {/* Left: Quick Tap Catalog */}
-          <div className="lg:col-span-7 xl:col-span-7 space-y-3">
-            <div className="space-y-0.5">
-              <h3 className="font-heading font-semibold text-sm text-foreground">
-                Tap Products or Add Custom Item
-              </h3>
-              <p className="text-[11px] text-muted-foreground">
-                Tap any product to add it to the counter sale, or type items sold without barcode.
-              </p>
+          <section aria-labelledby="sales-catalog" className="space-y-4 lg:col-span-7 xl:col-span-8">
+            <div className="flex items-center justify-between">
+              <h2 id="sales-catalog" className="font-heading text-2xl font-bold tracking-tight text-foreground">
+                Products catalog
+              </h2>
             </div>
             <SalesQuickCatalog products={products} />
-          </div>
+          </section>
 
-          {/* Right: Review & Stock Deduction Scene */}
-          <div className="lg:col-span-5 xl:col-span-5 lg:sticky lg:top-20 space-y-3">
-            <div className="space-y-0.5">
-              <h3 className="font-heading font-semibold text-sm text-foreground">
-                Sale Summary &amp; Proposed Stock
-              </h3>
-              <p className="text-[11px] text-muted-foreground">
-                Inspect before &amp; after stock counts before committing deduction.
-              </p>
-            </div>
+          {/* Right: Review & Stock Deduction Receipt */}
+          <section
+            aria-labelledby="sales-slip"
+            className="space-y-4 lg:sticky lg:top-24 lg:col-span-5 xl:col-span-4"
+          >
+            <h2 id="sales-slip" className="font-heading text-2xl font-bold tracking-tight text-foreground">
+              Sale slip
+            </h2>
             <SalesReviewScreen shop={shop} products={products} />
-          </div>
+          </section>
         </div>
       ) : (
-        <div className="max-w-3xl space-y-3">
+        /* Slip History View */
+        <div className="max-w-4xl space-y-4">
+          <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
+            Past sales slips
+          </h2>
           <SalesHistoryView shop={shop} />
         </div>
       )}

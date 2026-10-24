@@ -12,6 +12,11 @@ import {
   executeGetInventorySummary,
   executeProposeUpdateLocation,
   executeProposeUpdatePrice,
+  executeProposeDeleteProduct,
+  executeProposeRecordSale,
+  executeGetSalesHistory,
+  executeGetRestockOrdersSummary,
+  executeProposeRecordArrival,
 } from "@/lib/assistant/assistant-db";
 
 const LIVE_SYSTEM_INSTRUCTION = `You are "Koro", a fast, polite, and accurate female AI voice assistant for an Indian retail shopkeeper (kirana, cosmetics, general store, pharmacy, stationery).
@@ -49,12 +54,30 @@ Core Speaking Rules:
    - Say: "[productName] ka naya price set karne ke liye details screen par open kar di hain. Ek baar check karke confirm kar lijiye."
 7. Adding Brand-New Products:
    - ONLY call propose_create_product if the user explicitly wants to add an unlisted, brand-new product to the catalog (e.g. "Add new product Dettol soap", "Naya product XYZ add karo").
-   - NEVER call propose_create_product when the shopkeeper is simply telling where an item is stored ("Add Nivea cream to shelf 2") or what price it has ("Change price of Nivea cream to 50")!
-   - When calling propose_create_product, say politely in Hindi:
-     "[productName] nahi mili. Maine add karne ke liye details taiyaar kar di hain. Ek baar check kar lijiye."
-     Or in English if speaking in English:
-     "[productName] was not found in inventory. I have prepared the details to add it on your screen. Please review and confirm."
-   - Never fabricate stock quantities, locations, or prices. Rely strictly on tool outputs.`;
+   - NEVER call propose_create_product when the shopkeeper is simply telling where an item is stored or what price it has!
+   - When calling propose_create_product, say politely: "[productName] add karne ke liye details taiyaar hain. Ek baar check kar lijiye."
+8. Recording Counter Sales & Slips:
+   - When the user says they sold items (e.g. "Today I sold 5 Lakme items", "Sold 5 Lakme at 50", "5 Lakme beche", "Maine abhi-abhi Bahubali ki lal chudi bechi hai. Use sale me add kar"):
+     ALWAYS call propose_record_sale.
+     CRITICAL FOR UNLINKED / CUSTOM ITEMS:
+     If the item is not found in the inventory catalog, DO NOT REFUSE IT! The store explicitly supports unlinked / custom items. propose_record_sale will generate an unlinked sales slip confirmation card immediately without deducting stock.
+     Say: "[Product] ka sale slip screen par create kar diya hai. Check karke confirm kar dijiye."
+9. Sales History & Earnings Lookup:
+   - When the user asks how much money they earned, how much sales happened on a date, or asks for recent slips (e.g. "On 20th January 2026 how much did I earn", "today's sales", "aaj kitni kamai hui"):
+     ALWAYS call query_sales_history.
+     Answer directly with total earnings, bill count, and units sold.
+10. Restock Orders, Status & Queries:
+    - When user asks about cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order:
+      ALWAYS call query_restock_orders.
+      Give direct, short answers.
+11. Restock Arrival:
+    - When user says order or delivery arrived (e.g. "Lakme restock aa gaya", "Order PO-123 arrived"):
+      ALWAYS call propose_record_order_arrival.
+12. Deleting Products:
+    - When user asks to delete an item (e.g. "Delete product Lakme", "Lakme delete kar do"):
+      ALWAYS call propose_delete_product. Never delete silently.
+13. Ambiguity Resolution:
+    - If multiple matching products are found, the tools return distinct options. Ask the shopkeeper politely which specific product they meant before proceeding.`;
 
 const LIVE_TOOLS = [
   {
@@ -133,7 +156,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "propose_create_product",
-        description: "Propose creating a brand-new product in the store inventory ONLY when an item does NOT exist yet, or user explicitly says 'Add new product [name]'. NEVER use this when user is assigning location ('Add Nivea cream to location of shelf 2') or setting price ('Change price of Nivea cream to 50') - use propose_update_product_location or propose_update_product_price instead.",
+        description: "Propose creating a brand-new product in the store inventory ONLY when an item does NOT exist yet, or user explicitly says 'Add new product [name]'.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -155,7 +178,7 @@ const LIVE_TOOLS = [
             },
             category: {
               type: "STRING",
-              description: "Category of product (e.g. Cosmetics & Bangles / Jewelry, Kirana & Grocery, General Store)",
+              description: "Category of product",
             },
             storageLocation: {
               type: "STRING",
@@ -167,7 +190,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "get_store_inventory_summary",
-        description: "Count total distinct products vs total stock units in shop catalog, and check low stock items. ALWAYS use this when shopkeeper asks 'how many products do I have' or 'total products kitne hain'. Remember: total distinct products != total units.",
+        description: "Count total distinct products vs total stock units in shop catalog, and check low stock items.",
         parameters: {
           type: "OBJECT",
           properties: {},
@@ -175,7 +198,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "propose_update_product_location",
-        description: "Propose updating or assigning the shelf/drawer storage location of a product. Use when user says 'Add a Nivea cream to the location of shelf 2', 'Put Nivea cream at shelf 2', 'Update Lakme location to Drawer 3', 'Lakme location Shelf 2 kar do'. Never creates a duplicate product.",
+        description: "Propose updating or assigning the shelf/drawer storage location of a product.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -193,7 +216,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "propose_update_product_price",
-        description: "Propose updating or setting the selling price of a product. Use when user says 'Change the price of Nivea cream to 50', 'Add price of 50 to Nivea cream', 'Lakme ka price 150 kar do', 'Update Lakme price to 180'. Never creates a duplicate product.",
+        description: "Propose updating or setting the selling price of a product.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -207,6 +230,93 @@ const LIVE_TOOLS = [
             },
           },
           required: ["productName", "newPrice"],
+        },
+      },
+      {
+        name: "propose_delete_product",
+        description: "Propose permanently deleting a product from inventory catalog with confirmation.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            productName: {
+              type: "STRING",
+              description: "The name of the product to delete",
+            },
+          },
+          required: ["productName"],
+        },
+      },
+      {
+        name: "propose_record_sale",
+        description: "Propose recording a counter sale of products (e.g. 'Today I sold 5 Lakme items at 50', 'Maine Bahubali ki lal chudi bechi hai'). Also supports unlinked/custom items that are not yet in the inventory catalog (e.g. bangles, custom goods, loose items) without refusing.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            productName: {
+              type: "STRING",
+              description: "Product sold",
+            },
+            quantity: {
+              type: "INTEGER",
+              description: "Number of units sold",
+            },
+            unitPrice: {
+              type: "NUMBER",
+              description: "Price per unit in rupees if mentioned",
+            },
+            notes: {
+              type: "STRING",
+              description: "Optional notes",
+            },
+          },
+          required: ["productName", "quantity"],
+        },
+      },
+      {
+        name: "query_sales_history",
+        description: "Lookup past sales slips and total earnings/revenue for a specific date or period (e.g. 'On 20th January 2026 how much did I earn', 'today sales', 'how much sales happened').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            dateQuery: {
+              type: "STRING",
+              description: "Target date or period (e.g. '20th January 2026', '2026-01-20', 'today', 'yesterday')",
+            },
+          },
+        },
+      },
+      {
+        name: "query_restock_orders",
+        description: "Query restock orders, past purchase orders, cancelled orders, waiting/pending orders, delivered orders, unit counts, and whether new restock orders are needed.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            queryType: {
+              type: "STRING",
+              description: "Type of inquiry: 'cancelled', 'waiting', 'delivered', 'needs_reorder', or 'all'",
+            },
+          },
+        },
+      },
+      {
+        name: "propose_record_order_arrival",
+        description: "Propose marking a restock delivery/order item as arrived with confirmation, adding the arrived units to stock.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            productName: {
+              type: "STRING",
+              description: "The name of the product that arrived",
+            },
+            orderNumber: {
+              type: "STRING",
+              description: "Optional restock order/slip number (e.g. PO-260120-1234)",
+            },
+            quantity: {
+              type: "INTEGER",
+              description: "Units received",
+            },
+          },
         },
       },
     ],
@@ -343,6 +453,37 @@ export async function executeLiveToolCallAction(input: {
         args.productName || "",
         Number(args.newPrice) || 0
       );
+    } else if (toolName === "propose_delete_product") {
+      toolResult = await executeProposeDeleteProduct(
+        supabase,
+        shopId,
+        args.productName || ""
+      );
+    } else if (toolName === "propose_record_sale") {
+      toolResult = await executeProposeRecordSale(supabase, shopId, {
+        productName: args.productName || "",
+        quantity: Number(args.quantity) || 1,
+        unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
+        notes: args.notes,
+      });
+    } else if (toolName === "query_sales_history") {
+      toolResult = await executeGetSalesHistory(
+        supabase,
+        shopId,
+        args.dateQuery || ""
+      );
+    } else if (toolName === "query_restock_orders") {
+      toolResult = await executeGetRestockOrdersSummary(
+        supabase,
+        shopId,
+        args.queryType || ""
+      );
+    } else if (toolName === "propose_record_order_arrival") {
+      toolResult = await executeProposeRecordArrival(supabase, shopId, {
+        productName: args.productName,
+        orderNumber: args.orderNumber,
+        quantity: args.quantity ? Number(args.quantity) : undefined,
+      });
     } else {
       return { success: false, error: `Unknown tool: ${toolName}` };
     }

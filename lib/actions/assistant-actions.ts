@@ -9,6 +9,7 @@ import {
 } from "@/lib/validations/assistant";
 import { GoogleGenAI, Type } from "@google/genai";
 import { revalidatePath } from "next/cache";
+import { recordItemArrivalAction } from "@/lib/actions/restock-actions";
 
 export interface AssistantResponsePayload {
   role: "assistant";
@@ -22,34 +23,19 @@ export interface AssistantResponsePayload {
     | "create_product"
     | "update_location"
     | "update_price"
+    | "delete_product"
+    | "record_sale"
+    | "sales_history"
+    | "restock_orders"
+    | "record_order_arrival"
     | "inventory_summary"
     | "general";
   structuredData?: any;
-  pendingAction?: {
-    actionType:
-      | "adjust_stock"
-      | "create_product"
-      | "update_location"
-      | "update_price";
-    productId?: string;
-    productName: string;
-    currentStock?: number;
-    quantityDelta?: number;
-    newStock?: number;
-    reason?: string;
-    openingStock?: number;
-    sellingPrice?: number;
-    costPrice?: number;
-    category?: string;
-    storageLocation?: string;
-    currentLocation?: string;
-    newLocation?: string;
-    currentPrice?: number | null;
-    newPrice?: number;
-  } | null;
+  pendingAction?: AssistantPendingAction | null;
 }
 
 import {
+  type AssistantPendingAction,
   executeFindLocation,
   executeCheckStock,
   executeGetLowStock,
@@ -59,6 +45,11 @@ import {
   executeGetInventorySummary,
   executeProposeUpdateLocation,
   executeProposeUpdatePrice,
+  executeProposeDeleteProduct,
+  executeProposeRecordSale,
+  executeGetSalesHistory,
+  executeGetRestockOrdersSummary,
+  executeProposeRecordArrival,
   matchLocalIntent,
 } from "@/lib/assistant/assistant-db";
 
@@ -109,19 +100,19 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
   if (localMatch) {
     let resultPayload: AssistantResponsePayload | null = null;
 
-    if (localMatch.intent === "find_location") {
+    if (localMatch.intent === "find_location" && localMatch.target) {
       const res = await executeFindLocation(supabase, shopId, localMatch.target);
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "check_stock") {
+    } else if (localMatch.intent === "check_stock" && localMatch.target) {
       const res = await executeCheckStock(supabase, shopId, localMatch.target);
       resultPayload = { role: "assistant", ...res };
     } else if (localMatch.intent === "low_stock") {
       const res = await executeGetLowStock(supabase, shopId);
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "price_history") {
+    } else if (localMatch.intent === "price_history" && localMatch.target) {
       const res = await executeGetPriceHistory(supabase, shopId, localMatch.target);
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "adjust_stock" && localMatch.delta) {
+    } else if (localMatch.intent === "adjust_stock" && localMatch.delta && localMatch.target) {
       const res = await executeProposeStockAdjustment(
         supabase,
         shopId,
@@ -129,7 +120,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
         localMatch.delta
       );
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "create_product") {
+    } else if (localMatch.intent === "create_product" && localMatch.target) {
       const res = await executeProposeCreateProduct(supabase, shopId, {
         productName: localMatch.target,
         openingStock: 1,
@@ -138,7 +129,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     } else if (localMatch.intent === "inventory_summary") {
       const res = await executeGetInventorySummary(supabase, shopId);
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "update_location") {
+    } else if (localMatch.intent === "update_location" && localMatch.target) {
       const res = await executeProposeUpdateLocation(
         supabase,
         shopId,
@@ -146,13 +137,29 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
         (localMatch as any).newLocation || ""
       );
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "update_price") {
+    } else if (localMatch.intent === "update_price" && localMatch.target) {
       const res = await executeProposeUpdatePrice(
         supabase,
         shopId,
         localMatch.target,
         (localMatch as any).newPrice || 0
       );
+      resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "delete_product" && localMatch.target) {
+      const res = await executeProposeDeleteProduct(supabase, shopId, localMatch.target);
+      resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "record_sale" && localMatch.target) {
+      const res = await executeProposeRecordSale(supabase, shopId, {
+        productName: localMatch.target,
+        quantity: (localMatch as any).quantity,
+        unitPrice: (localMatch as any).unitPrice,
+      });
+      resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "sales_history") {
+      const res = await executeGetSalesHistory(supabase, shopId, (localMatch as any).dateQuery);
+      resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "restock_orders") {
+      const res = await executeGetRestockOrdersSummary(supabase, shopId, (localMatch as any).queryType);
       resultPayload = { role: "assistant", ...res };
     }
 
@@ -333,6 +340,93 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
                 required: ["productName", "newPrice"],
               },
             },
+            {
+              name: "propose_delete_product",
+              description: "Propose permanently deleting a product from inventory catalog with shopkeeper confirmation.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: {
+                    type: Type.STRING,
+                    description: "The name of the product to delete",
+                  },
+                },
+                required: ["productName"],
+              },
+            },
+            {
+              name: "propose_record_sale",
+              description: "Propose recording a counter sale of products (e.g. 'Today I sold 5 Lakme items at 50', 'Maine Bahubali ki lal chudi bechi hai'). Also supports unlinked/custom items that are not yet in the inventory catalog (e.g. bangles, custom goods, loose items) without refusing.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: {
+                    type: Type.STRING,
+                    description: "Product sold",
+                  },
+                  quantity: {
+                    type: Type.INTEGER,
+                    description: "Number of units sold",
+                  },
+                  unitPrice: {
+                    type: Type.NUMBER,
+                    description: "Price per unit in rupees if mentioned",
+                  },
+                  notes: {
+                    type: Type.STRING,
+                    description: "Optional notes",
+                  },
+                },
+                required: ["productName", "quantity"],
+              },
+            },
+            {
+              name: "query_sales_history",
+              description: "Lookup past sales slips and total earnings/revenue for a specific date or period (e.g. 'On 20th January 2026 how much money did I earn', 'today sales', 'how much sales happened').",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  dateQuery: {
+                    type: Type.STRING,
+                    description: "Target date or period (e.g. '20th January 2026', '2026-01-20', 'today', 'yesterday')",
+                  },
+                },
+              },
+            },
+            {
+              name: "query_restock_orders",
+              description: "Query restock orders, past purchase orders, cancelled orders, waiting/pending orders, delivered orders, unit counts, and whether new restock orders are needed.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  queryType: {
+                    type: Type.STRING,
+                    description: "Type of inquiry: 'cancelled', 'waiting', 'delivered', 'needs_reorder', or 'all'",
+                  },
+                },
+              },
+            },
+            {
+              name: "propose_record_order_arrival",
+              description: "Propose marking a restock delivery/order item as arrived with confirmation, adding the arrived units to stock.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: {
+                    type: Type.STRING,
+                    description: "The name of the product that arrived",
+                  },
+                  orderNumber: {
+                    type: Type.STRING,
+                    description: "Optional restock order/slip number (e.g. PO-260120-1234)",
+                  },
+                  quantity: {
+                    type: Type.INTEGER,
+                    description: "Units received",
+                  },
+                },
+              },
+            },
           ],
         },
       ];
@@ -346,8 +440,14 @@ Rules:
 5. If asked for total products or store inventory summary, call get_store_inventory_summary. Remember: total products = distinct catalog products (e.g. 2 items), total units = sum of stock quantities (e.g. 7 pieces). Do NOT confuse them.
 6. If asked to update or assign location, call propose_update_product_location.
 7. If asked to update or assign price, call propose_update_product_price.
-8. Support English and Hinglish (e.g. "Lakme kahan hai", "kitna bacha hai").
-9. Keep your final answer short and clear.`;
+8. If user mentions selling items or recording a sale (e.g. "Today I sold 5 Lakme items", "Sold 5 Lakme at 50", "5 Lakme beche", "Maine abhi-abhi Bahubali ki lal chudi bechi hai. Use sale me add kar"), ALWAYS call propose_record_sale. If the item is not found in the inventory catalog, DO NOT REFUSE IT! The store supports unlinked / custom items; propose_record_sale will create an unlinked custom sales slip.
+9. If user asks about earnings or sales history by date (e.g. "On 20th January 2026 how much money did I earn", "how much sales happened", "today's earnings"), call query_sales_history.
+10. If user asks about restock orders, cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order, call query_restock_orders.
+11. If user says an order or restock arrived, call propose_record_order_arrival.
+12. If user asks to delete a product (e.g. "Delete product Lakme"), call propose_delete_product. Never delete without confirmation.
+13. If multiple items match, the tools will automatically return clarifying options. Be friendly and helpful.
+14. Support English and Hinglish (e.g. "Lakme kahan hai", "kitna bacha hai", "aaj kitni sale hui").
+15. Keep your final answer short and clear.`;
 
       const response = await ai.models.generateContent({
         model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
@@ -407,6 +507,37 @@ Rules:
             args.productName || query,
             Number(args.newPrice) || 0
           );
+        } else if (call.name === "propose_delete_product") {
+          toolResult = await executeProposeDeleteProduct(
+            supabase,
+            shopId,
+            args.productName || query
+          );
+        } else if (call.name === "propose_record_sale") {
+          toolResult = await executeProposeRecordSale(supabase, shopId, {
+            productName: args.productName || query,
+            quantity: Number(args.quantity) || 1,
+            unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
+            notes: args.notes,
+          });
+        } else if (call.name === "query_sales_history") {
+          toolResult = await executeGetSalesHistory(
+            supabase,
+            shopId,
+            args.dateQuery || query
+          );
+        } else if (call.name === "query_restock_orders") {
+          toolResult = await executeGetRestockOrdersSummary(
+            supabase,
+            shopId,
+            args.queryType || query
+          );
+        } else if (call.name === "propose_record_order_arrival") {
+          toolResult = await executeProposeRecordArrival(supabase, shopId, {
+            productName: args.productName,
+            orderNumber: args.orderNumber,
+            quantity: args.quantity ? Number(args.quantity) : undefined,
+          });
         }
 
         if (toolResult) {
@@ -766,6 +897,150 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       revalidatePath("/dashboard");
       return { success: true, message: confirmMsg, product: updatedProd };
+    }
+
+    if (actionType === "delete_product") {
+      if (!productId) {
+        throw new Error("Missing product ID for deletion");
+      }
+
+      const { error: delErr } = await (supabase as any)
+        .from("products")
+        .delete()
+        .eq("id", productId)
+        .eq("shop_id", shopId);
+
+      if (delErr) throw delErr;
+
+      const confirmMsg = `✅ **Product Deleted!** **${productName}** ko inventory catalog se permanently delete kar diya gaya hai.`;
+
+      await (supabase.from("assistant_messages") as any).insert({
+        shop_id: shopId,
+        user_id: user.id,
+        role: "assistant",
+        content: confirmMsg,
+        task_type: "delete_product",
+        metadata: {
+          confirmed: true,
+          productId,
+          productName,
+        },
+      });
+
+      revalidatePath("/dashboard");
+      return { success: true, message: confirmMsg };
+    }
+
+    if (actionType === "record_sale") {
+      const quantitySold = parseResult.data.quantity || 1;
+      const unitPriceSold =
+        parseResult.data.unitPrice !== undefined
+          ? parseResult.data.unitPrice
+          : sellingPrice !== undefined
+          ? sellingPrice
+          : 0;
+
+      const dateTag = new Date().toISOString().slice(2, 10).replace(/-/g, "");
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const slipNumber = `SLIP-${dateTag}-${randomSuffix}`;
+      const idempotencyKey = `sale-${Date.now()}-${randomSuffix}`;
+
+      const slipLines = [
+        {
+          product_id: productId || null,
+          raw_item_name: productName,
+          quantity: quantitySold,
+          unit_price: unitPriceSold,
+          is_tracked: Boolean(productId),
+          status: productId ? "matched" : "untracked",
+        },
+      ];
+
+      const { data: saleResult, error: saleErr } = await (supabase as any).rpc("record_sales_slip", {
+        p_shop_id: shopId,
+        p_slip_number: slipNumber,
+        p_source: "manual",
+        p_notes: reason || "Recorded via Voice/Chat Assistant",
+        p_idempotency_key: idempotencyKey,
+        p_lines: slipLines,
+      });
+
+      if (saleErr) throw saleErr;
+
+      let updatedStockText = "";
+      if (productId) {
+        const { data: updatedProd } = await (supabase as any)
+          .from("products")
+          .select("current_stock")
+          .eq("id", productId)
+          .single();
+        if (updatedProd) {
+          updatedStockText = ` Naya stock **${updatedProd.current_stock} units** hai.`;
+        }
+      }
+
+      const totalEarned = quantitySold * unitPriceSold;
+      const confirmMsg = productId
+        ? `✅ **Sale Recorded & Stock Deducted!** Slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned}).${updatedStockText}`
+        : `✅ **Custom Sale Recorded!** **${quantitySold}x ${productName}** (Unlinked) ka slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned}). Ise slip history aur earnings mein record kar liya gaya hai.`;
+
+      await (supabase.from("assistant_messages") as any).insert({
+        shop_id: shopId,
+        user_id: user.id,
+        role: "assistant",
+        content: confirmMsg,
+        task_type: "record_sale",
+        metadata: {
+          confirmed: true,
+          productId,
+          productName,
+          quantity: quantitySold,
+          unitPrice: unitPriceSold,
+          totalAmount: totalEarned,
+          slipNumber,
+        },
+      });
+
+      revalidatePath("/dashboard");
+      return { success: true, message: confirmMsg, slipNumber, totalAmount: totalEarned };
+    }
+
+    if (actionType === "record_order_arrival") {
+      const orderItemId = parseResult.data.orderItemId;
+      const quantityReceived = parseResult.data.receivedQuantity || parseResult.data.quantity || 1;
+
+      if (!orderItemId || !productId) {
+        throw new Error("Missing order item ID or product ID for arrival");
+      }
+
+      const res = await recordItemArrivalAction({
+        orderItemId,
+        productId,
+        receivedQuantity: quantityReceived,
+        notes: "Arrival recorded via Voice/Chat Assistant",
+      });
+
+      if (!res.success) throw new Error(res.error || "Failed to record order arrival");
+
+      const confirmMsg = `✅ **Stock Arrival Recorded!** **${productName}** ke +${quantityReceived} units stock mein add ho gaye hain (Total: **${res.newStock} units**).`;
+
+      await (supabase.from("assistant_messages") as any).insert({
+        shop_id: shopId,
+        user_id: user.id,
+        role: "assistant",
+        content: confirmMsg,
+        task_type: "record_order_arrival",
+        metadata: {
+          confirmed: true,
+          productId,
+          productName,
+          receivedQuantity: quantityReceived,
+          newStock: res.newStock,
+        },
+      });
+
+      revalidatePath("/dashboard");
+      return { success: true, message: confirmMsg, newStock: res.newStock };
     }
 
     return { success: false, error: "Unsupported action type" };

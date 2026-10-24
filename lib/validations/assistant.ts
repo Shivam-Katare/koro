@@ -22,11 +22,14 @@ export const confirmAssistantActionSchema = z.object({
     "create_product",
     "update_location",
     "update_price",
+    "delete_product",
+    "record_sale",
+    "record_order_arrival",
   ]),
   productId: z.string().uuid().optional(),
   productName: z.string().min(1),
   quantityDelta: z.number().int().optional(),
-  newStock: z.number().int().nonnegative().optional(),
+  newStock: z.number().int().nonnegative().optional().nullable(),
   reason: z.string().optional(),
   openingStock: z.number().int().nonnegative().optional(),
   sellingPrice: z.number().nonnegative().optional(),
@@ -38,6 +41,15 @@ export const confirmAssistantActionSchema = z.object({
   currentPrice: z.number().optional().nullable(),
   newPrice: z.number().nonnegative().optional(),
   conversationId: z.string().optional(),
+  // For record_sale
+  quantity: z.number().int().positive().optional(),
+  unitPrice: z.number().nonnegative().optional(),
+  totalAmount: z.number().nonnegative().optional(),
+  isUnlinked: z.boolean().optional(),
+  // For record_order_arrival
+  orderItemId: z.string().uuid().optional(),
+  orderNumber: z.string().optional(),
+  receivedQuantity: z.number().int().positive().optional(),
 });
 
 

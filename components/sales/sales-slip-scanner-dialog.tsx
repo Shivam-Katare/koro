@@ -206,16 +206,14 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
       {trigger ? (
         <div onClick={() => setIsOpen(true)}>{trigger}</div>
       ) : (
-        <Button
+        <button
           type="button"
-          variant="outline"
-          size="sm"
           onClick={() => setIsOpen(true)}
-          className="h-8.5 px-3 rounded-lg border-border hover:bg-muted text-xs font-medium gap-2 cursor-pointer shadow-none"
+          className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted shrink-0"
         >
-          <Camera className="h-3.5 w-3.5 text-primary" />
+          <Camera className="h-4 w-4 text-primary" />
           <span>Scan Bill / Slip</span>
-        </Button>
+        </button>
       )}
 
       <Dialog
@@ -225,12 +223,12 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
           if (!open) resetState();
         }}
       >
-        <DialogContent className="max-w-xl p-0 overflow-hidden border border-border/80 bg-card shadow-2xl">
+        <DialogContent className="max-w-xl p-0 overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
           {/* Header */}
-          <DialogHeader className="p-4 sm:p-5 border-b border-border/70 bg-muted/20">
-            <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-                <Camera className="h-4 w-4" />
+          <DialogHeader className="p-4 sm:p-5 border-b border-border bg-muted/20">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                <Camera className="h-5 w-5" />
               </div>
               <div>
                 <DialogTitle className="text-base font-semibold font-heading text-foreground">

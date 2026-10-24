@@ -82,8 +82,8 @@ export function ChatsView({ shop }: ChatsViewProps) {
         const res = await fetchAssistantConversationsAction(shop.id);
         if (res.success && res.conversations) {
           setConversations(res.conversations);
-        } else if (res.error) {
-          toast.error(res.error);
+        } else if ((res as any).error) {
+          toast.error((res as any).error);
         }
       } catch (err) {
         console.error("Failed to load conversations:", err);
@@ -110,7 +110,7 @@ export function ChatsView({ shop }: ChatsViewProps) {
         setConversations((prev) => prev.filter((c) => c.id !== convId));
         toast.success("Conversation deleted");
       } else {
-        toast.error(res.error || "Failed to delete conversation");
+        toast.error((res as any).error || "Failed to delete conversation");
       }
     } catch {
       toast.error("Failed to delete conversation");
