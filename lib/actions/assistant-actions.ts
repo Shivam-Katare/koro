@@ -484,7 +484,18 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
         },
       ];
 
-      const systemInstruction = `You are "Koro", the AI assistant for an Indian retail shopkeeper (kirana, cosmetics, general store).
+      const { data: currentShop } = await (supabase.from("shops") as any)
+        .select("name, category, description")
+        .eq("id", shopId)
+        .maybeSingle();
+
+      const shopContext = currentShop
+        ? `\nActive Store Context:\n- Store Name: "${currentShop.name}"\n- Category: "${currentShop.category}"${
+            currentShop.description ? `\n- About Store / Specialties: "${currentShop.description}"` : ""
+          }\nWhen the shopkeeper asks about their shop, business details, or category, refer to this context accurately.`
+        : "";
+
+      const systemInstruction = `You are "Koro", the AI assistant for an Indian retail shopkeeper (kirana, cosmetics, general store).${shopContext}
 Rules:
 1. Always be concise, fast, and polite. Shopkeepers use this during busy store rush hours.
 2. Never invent stock counts, locations, or prices. Always call the corresponding tool.

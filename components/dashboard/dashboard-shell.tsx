@@ -9,9 +9,11 @@ import { ProductsView } from "./views/products-view";
 import { SalesView } from "@/components/sales/sales-view";
 import { RestockView } from "@/components/restock/restock-view";
 import { ChatsView } from "./views/chats-view";
+import { SettingsView } from "./views/settings-view";
 import { AssistantChatDrawer } from "@/components/assistant/assistant-chat-drawer";
 import { useDashboardNav } from "@/lib/hooks/use-dashboard-nav";
 import { useAssistantStore } from "@/lib/store/use-assistant-store";
+import { useState, useEffect } from "react";
 import type {
   Shop,
   Profile,
@@ -42,6 +44,12 @@ export function DashboardShell({
   salesSlips = [],
 }: DashboardShellProps) {
   const { activeTab } = useDashboardNav();
+  const [currentShop, setCurrentShop] = useState<Shop | null>(shop);
+
+  useEffect(() => {
+    setCurrentShop(shop);
+  }, [shop]);
+
   const {
     isOpen,
     setIsOpen,
@@ -63,15 +71,15 @@ export function DashboardShell({
       }
     >
       <div className="flex min-h-screen w-full bg-background">
-        <DashboardSidebar shop={shop} profile={profile} products={products} />
+        <DashboardSidebar shop={currentShop} profile={profile} products={products} />
 
         <SidebarInset className="flex flex-col flex-1 min-w-0">
-          <DashboardHeaderBar shop={shop} />
+          <DashboardHeaderBar shop={currentShop} />
 
           <main className="flex-1 w-full mx-auto px-4 py-6 sm:px-6 lg:px-8">
             {activeTab === "home" && (
               <HomeView
-                shop={shop}
+                shop={currentShop}
                 profile={profile}
                 products={products}
                 restockOrders={restockOrders}
@@ -81,16 +89,16 @@ export function DashboardShell({
             )}
 
             {activeTab === "products" && (
-              <ProductsView shop={shop} products={products} />
+              <ProductsView shop={currentShop} products={products} />
             )}
 
             {activeTab === "sales" && (
-              <SalesView shop={shop} products={products} initialSlips={salesSlips} />
+              <SalesView shop={currentShop} products={products} initialSlips={salesSlips} />
             )}
 
             {activeTab === "restock" && (
               <RestockView
-                shop={shop}
+                shop={currentShop}
                 products={products}
                 initialOrders={restockOrders}
                 initialItems={restockOrderItems}
@@ -98,12 +106,22 @@ export function DashboardShell({
             )}
 
             {activeTab === "chats" && (
-              <ChatsView shop={shop} products={products} profile={profile} />
+              <ChatsView shop={currentShop} products={products} profile={profile} />
+            )}
+
+            {activeTab === "settings" && (
+              <SettingsView
+                shop={currentShop}
+                profile={profile}
+                productsCount={products.length}
+                salesCount={salesSlips.length}
+                onShopUpdated={(updated) => setCurrentShop(updated)}
+              />
             )}
           </main>
 
           <AssistantChatDrawer
-            shop={shop}
+            shop={currentShop}
             products={products}
             isOpen={isOpen}
             onOpenChange={setIsOpen}

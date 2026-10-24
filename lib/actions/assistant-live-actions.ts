@@ -413,6 +413,19 @@ export async function getLiveSessionTokenAction(shopId: string) {
     const ai = new GoogleGenAI({ apiKey });
     const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
+    const { data: currentShop } = await (supabase.from("shops") as any)
+      .select("name, category, description")
+      .eq("id", shopId)
+      .maybeSingle();
+
+    const shopContext = currentShop
+      ? `\n\nActive Store Context:\n- Store Name: "${currentShop.name}"\n- Category: "${currentShop.category}"${
+          currentShop.description ? `\n- About Store / Specialties: "${currentShop.description}"` : ""
+        }\nWhen the shopkeeper asks about their shop name, category, or business details, use this context.`
+      : "";
+
+    const liveInstruction = `${LIVE_SYSTEM_INSTRUCTION}${shopContext}`;
+
     const token = await ai.authTokens.create({
       config: {
         uses: 1,
@@ -429,7 +442,7 @@ export async function getLiveSessionTokenAction(shopId: string) {
               },
             },
             systemInstruction: {
-              parts: [{ text: LIVE_SYSTEM_INSTRUCTION }],
+              parts: [{ text: liveInstruction }],
             },
             tools: LIVE_TOOLS as any,
           },

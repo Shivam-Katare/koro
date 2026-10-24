@@ -14,10 +14,10 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/landing/theme-toggle";
-import { KoroFace } from "@/components/brand/koro-face";
+import { Facehash } from "facehash";
 import { useDashboardNav, type DashboardTab } from "@/lib/hooks/use-dashboard-nav";
 import type { Shop, Profile, Product } from "@/lib/supabase/types";
-import { Home, Package, ReceiptText, RefreshCw, MessageSquare, LogOut } from "lucide-react";
+import { Home, Package, ReceiptText, RefreshCw, MessageSquare, Settings } from "lucide-react";
 import { cn } from "cn";
 
 interface DashboardSidebarProps {
@@ -27,7 +27,7 @@ interface DashboardSidebarProps {
 }
 
 export function DashboardSidebar({ shop, profile, products }: DashboardSidebarProps) {
-  const { activeTab, setActiveTab, handleSignOut } = useDashboardNav();
+  const { activeTab, setActiveTab } = useDashboardNav();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
 
@@ -47,10 +47,8 @@ export function DashboardSidebar({ shop, profile, products }: DashboardSidebarPr
       badgeVariant: "destructive" as const,
     },
     { id: "chats" as DashboardTab, label: "Chats", icon: MessageSquare },
+    { id: "settings" as DashboardTab, label: "Settings", icon: Settings },
   ];
-
-  const ownerName = profile?.full_name || "Owner";
-  const initial = ownerName.trim().charAt(0).toUpperCase() || "O";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
@@ -62,7 +60,12 @@ export function DashboardSidebar({ shop, profile, products }: DashboardSidebarPr
         )}
       >
         <div className={cn("flex min-w-0 items-center", isCollapsed ? "justify-center" : "gap-3")}>
-          <KoroFace size={40} tone="marigold" className="shrink-0" />
+          <Facehash
+            name={shop?.name || "Koro"}
+            size={40}
+            colors={["#ffb110", "#62aef0", "#0075de", "#4cc38a", "#f64932", "#ff9db1"]}
+            className="rounded-full overflow-hidden shrink-0 ring-2 ring-sidebar-border"
+          />
           {!isCollapsed && (
             <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
               <span className="font-heading text-lg font-bold leading-tight text-sidebar-foreground">Koro</span>
@@ -144,43 +147,7 @@ export function DashboardSidebar({ shop, profile, products }: DashboardSidebarPr
               Dark mode
             </span>
           )}
-          <ThemeToggle />
-        </div>
-
-        <div
-          className={cn(
-            "flex items-center rounded-2xl transition-all",
-            isCollapsed
-              ? "flex-col bg-transparent p-0 gap-2 items-center"
-              : "gap-3 bg-sidebar-accent/60 p-2"
-          )}
-        >
-          <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ffb110] text-base font-bold text-black"
-            aria-hidden="true"
-          >
-            {initial}
-          </div>
-          {!isCollapsed && (
-            <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
-              <span className="truncate text-base font-semibold leading-tight text-sidebar-foreground">
-                {ownerName}
-              </span>
-              <span className="truncate text-sm leading-tight text-muted-foreground">
-                {profile?.email || ""}
-              </span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleSignOut}
-            title="Sign out"
-            aria-label="Sign out"
-            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          >
-            <LogOut className="size-5" />
-          </button>
+           <ThemeToggle />
         </div>
       </SidebarFooter>
     </Sidebar>
