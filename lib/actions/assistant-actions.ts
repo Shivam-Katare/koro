@@ -32,6 +32,7 @@ export interface AssistantResponsePayload {
     | "general";
   structuredData?: any;
   pendingAction?: AssistantPendingAction | null;
+  pendingActions?: AssistantPendingAction[] | null;
 }
 
 import {
@@ -47,6 +48,7 @@ import {
   executeProposeUpdatePrice,
   executeProposeDeleteProduct,
   executeProposeRecordSale,
+  executeUpdateSlipNote,
   executeGetSalesHistory,
   executeGetRestockOrdersSummary,
   executeProposeRecordArrival,
@@ -148,15 +150,23 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     } else if (localMatch.intent === "delete_product" && localMatch.target) {
       const res = await executeProposeDeleteProduct(supabase, shopId, localMatch.target);
       resultPayload = { role: "assistant", ...res };
-    } else if (localMatch.intent === "record_sale" && localMatch.target) {
+    } else if (localMatch.intent === "record_sale" && (localMatch.target || (localMatch as any).items)) {
       const res = await executeProposeRecordSale(supabase, shopId, {
-        productName: localMatch.target,
+        items: (localMatch as any).items,
+        productName: (localMatch as any).items ? undefined : localMatch.target,
         quantity: (localMatch as any).quantity,
         unitPrice: (localMatch as any).unitPrice,
       });
       resultPayload = { role: "assistant", ...res };
     } else if (localMatch.intent === "sales_history") {
       const res = await executeGetSalesHistory(supabase, shopId, (localMatch as any).dateQuery);
+      resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "update_slip_note") {
+      const res = await executeUpdateSlipNote(supabase, shopId, {
+        note: (localMatch as any).note,
+        slipNumber: (localMatch as any).slipNumber,
+        itemHint: (localMatch as any).itemHint,
+      });
       resultPayload = { role: "assistant", ...res };
     } else if (localMatch.intent === "restock_orders") {
       const res = await executeGetRestockOrdersSummary(supabase, shopId, (localMatch as any).queryType);
@@ -356,39 +366,82 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
             },
             {
               name: "propose_record_sale",
-              description: "Propose recording a counter sale of products (e.g. 'Today I sold 5 Lakme items at 50', 'Maine Bahubali ki lal chudi bechi hai'). Also supports unlinked/custom items that are not yet in the inventory catalog (e.g. bangles, custom goods, loose items) without refusing.",
+              description: "Propose recording a counter sales slip with one or multiple items (e.g. 'Today I sold 4 Nivea creams, 3 Lakme Kajals, and 2 chudis', 'Sold 5 Lakme at 50'). Also supports unlinked/custom items that are not yet in the inventory catalog without refusing.",
               parameters: {
                 type: Type.OBJECT,
                 properties: {
+                  items: {
+                    type: Type.ARRAY,
+                    description: "List of items sold together in this sales slip. Use this when one or more items are sold together in a transaction.",
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        productName: {
+                          type: Type.STRING,
+                          description: "Product name (e.g. 'Nivea cream', 'Lakme Kajal', 'Chudi')",
+                        },
+                        quantity: {
+                          type: Type.INTEGER,
+                          description: "Number of units sold (default 1)",
+                        },
+                        unitPrice: {
+                          type: Type.NUMBER,
+                          description: "Price per unit in rupees if mentioned",
+                        },
+                      },
+                      required: ["productName"],
+                    },
+                  },
                   productName: {
                     type: Type.STRING,
-                    description: "Product sold",
+                    description: "Single product name if only one item is sold",
                   },
                   quantity: {
                     type: Type.INTEGER,
-                    description: "Number of units sold",
+                    description: "Number of units sold (if single item)",
                   },
                   unitPrice: {
                     type: Type.NUMBER,
-                    description: "Price per unit in rupees if mentioned",
+                    description: "Price per unit in rupees (if single item)",
                   },
                   notes: {
                     type: Type.STRING,
-                    description: "Optional notes",
+                    description: "Optional customer or slip note (e.g. 'Udhar ₹50', customer name)",
                   },
                 },
-                required: ["productName", "quantity"],
+              },
+            },
+            {
+              name: "update_slip_note",
+              description: "Add or update customer notes or udhar note on an existing sales slip (e.g. 'For recent slip add note: udhar of 50', 'Slip 4567834 me note update karo: Ramesh udhar').",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  note: {
+                    type: Type.STRING,
+                    description: "The note text to add or update (e.g. 'Udhar of ₹50', 'Ramesh bhai udhar')",
+                  },
+                  slipNumber: {
+                    type: Type.STRING,
+                    description: "Optional slip number if mentioned (e.g. '4567834', 'SLIP-261024-1234')",
+                  },
+                  itemHint: {
+                    type: Type.STRING,
+                    description: "Optional item name in the slip if referring to a recent item slip (e.g. 'chudi', 'nivea')",
+                  },
+                },
+                required: ["note"],
               },
             },
             {
               name: "query_sales_history",
-              description: "Lookup past sales slips and total earnings/revenue for a specific date or period (e.g. 'On 20th January 2026 how much money did I earn', 'today sales', 'how much sales happened').",
+              description: "Lookup past sales slips and total earnings/revenue for a specific date or period (e.g. 'How much money did I sell', 'On 20th January 2026 how much money did I earn', 'today sales', 'this week sales').",
               parameters: {
                 type: Type.OBJECT,
                 properties: {
                   dateQuery: {
                     type: Type.STRING,
-                    description: "Target date or period (e.g. '20th January 2026', '2026-01-20', 'today', 'yesterday')",
+                    description: "Target date or period (e.g. 'today', 'yesterday', 'this week', 'this month', '20th January 2026')",
                   },
                 },
               },
@@ -431,7 +484,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
         },
       ];
 
-      const systemInstruction = `You are "Koro", the voice assistant for an Indian retail shopkeeper (kirana, cosmetics, general store).
+      const systemInstruction = `You are "Koro", the AI assistant for an Indian retail shopkeeper (kirana, cosmetics, general store).
 Rules:
 1. Always be concise, fast, and polite. Shopkeepers use this during busy store rush hours.
 2. Never invent stock counts, locations, or prices. Always call the corresponding tool.
@@ -440,14 +493,23 @@ Rules:
 5. If asked for total products or store inventory summary, call get_store_inventory_summary. Remember: total products = distinct catalog products (e.g. 2 items), total units = sum of stock quantities (e.g. 7 pieces). Do NOT confuse them.
 6. If asked to update or assign location, call propose_update_product_location.
 7. If asked to update or assign price, call propose_update_product_price.
-8. If user mentions selling items or recording a sale (e.g. "Today I sold 5 Lakme items", "Sold 5 Lakme at 50", "5 Lakme beche", "Maine abhi-abhi Bahubali ki lal chudi bechi hai. Use sale me add kar"), ALWAYS call propose_record_sale. If the item is not found in the inventory catalog, DO NOT REFUSE IT! The store supports unlinked / custom items; propose_record_sale will create an unlinked custom sales slip.
-9. If user asks about earnings or sales history by date (e.g. "On 20th January 2026 how much money did I earn", "how much sales happened", "today's earnings"), call query_sales_history.
-10. If user asks about restock orders, cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order, call query_restock_orders.
-11. If user says an order or restock arrived, call propose_record_order_arrival.
-12. If user asks to delete a product (e.g. "Delete product Lakme"), call propose_delete_product. Never delete without confirmation.
-13. If multiple items match, the tools will automatically return clarifying options. Be friendly and helpful.
-14. Support English and Hinglish (e.g. "Lakme kahan hai", "kitna bacha hai", "aaj kitni sale hui").
-15. Keep your final answer short and clear.`;
+8. Recording Counter Sales:
+   - When user mentions selling items (e.g. "Today I sold 4 Nivea creams, 3 Lakme Kajals, and 2 chudis", "2 Nivea and 1 Lakme becha"):
+     By default, put all items sold together into ONE single sales slip using the items array of propose_record_sale!
+   - ONLY split into separate slips if the shopkeeper explicitly asks (e.g. "Make 2 slips: in 1 slip put Lakme and Nivea, and in 2nd slip put chudi"). In that case, call propose_record_sale multiple times, once for each requested slip.
+   - If an item is uncataloged/unlinked, DO NOT REFUSE IT. Propose it as an unlinked item in the sales slip.
+   - Out-of-Stock Awareness: If an item is out of stock in the system (0 units), STILL include it in the sales slip (shopkeepers frequently sell newly arrived stock before entering purchase orders into the system), and politely acknowledge it.
+9. Querying Earnings & Sales:
+   - When asked "How much money did I sell?", "How much did I earn?", "Total sale kitni hui?", with no date specified, default date to "today" and call query_sales_history.
+   - If asked for yesterday, this week, this month, or a specific date (e.g. "20th January 2026"), pass that to query_sales_history.
+10. Updating Slip Notes & Udhar:
+   - When the user asks to add or update a note on a sales slip (e.g. "For the recent slip that you have created for chudi, add a note as well, like it's a udhar of ₹50", "Slip 4567834 me note update karo"):
+     ALWAYS call update_slip_note with the note and optional slip number or item hint.
+11. If user asks about restock orders, cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order, call query_restock_orders.
+12. If user says an order or restock arrived, call propose_record_order_arrival.
+13. If user asks to delete a product (e.g. "Delete product Lakme"), call propose_delete_product. Never delete without confirmation.
+14. If multiple items match, the tools will automatically return clarifying options. Be friendly and helpful.
+15. Support English, Hindi, and Hinglish. Keep your final answer short and clear.`;
 
       const response = await ai.models.generateContent({
         model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
@@ -461,92 +523,112 @@ Rules:
 
       const functionCalls = response.functionCalls;
       if (functionCalls && functionCalls.length > 0) {
-        const call = functionCalls[0];
-        const args = (call.args as any) || {};
+        const results: any[] = [];
 
-        let toolResult: any = null;
+        for (const call of functionCalls) {
+          const args = (call.args as any) || {};
+          let toolResult: any = null;
 
-        if (call.name === "find_product_location") {
-          toolResult = await executeFindLocation(supabase, shopId, args.productName || query);
-        } else if (call.name === "check_product_stock") {
-          toolResult = await executeCheckStock(supabase, shopId, args.productName || query);
-        } else if (call.name === "get_low_stock_products") {
-          toolResult = await executeGetLowStock(supabase, shopId);
-        } else if (call.name === "get_product_price_history") {
-          toolResult = await executeGetPriceHistory(supabase, shopId, args.productName || query);
-        } else if (call.name === "propose_stock_adjustment") {
-          toolResult = await executeProposeStockAdjustment(
-            supabase,
-            shopId,
-            args.productName || query,
-            args.quantityDelta || 0,
-            args.reason
-          );
-        } else if (call.name === "propose_create_product") {
-          toolResult = await executeProposeCreateProduct(supabase, shopId, {
-            productName: args.productName || query,
-            openingStock: args.openingStock !== undefined ? Number(args.openingStock) : 1,
-            sellingPrice: args.sellingPrice !== undefined ? Number(args.sellingPrice) : undefined,
-            costPrice: args.costPrice !== undefined ? Number(args.costPrice) : undefined,
-            category: args.category,
-            storageLocation: args.storageLocation,
-          });
-        } else if (call.name === "get_store_inventory_summary") {
-          toolResult = await executeGetInventorySummary(supabase, shopId);
-        } else if (call.name === "propose_update_product_location") {
-          toolResult = await executeProposeUpdateLocation(
-            supabase,
-            shopId,
-            args.productName || query,
-            args.newLocation || ""
-          );
-        } else if (call.name === "propose_update_product_price") {
-          toolResult = await executeProposeUpdatePrice(
-            supabase,
-            shopId,
-            args.productName || query,
-            Number(args.newPrice) || 0
-          );
-        } else if (call.name === "propose_delete_product") {
-          toolResult = await executeProposeDeleteProduct(
-            supabase,
-            shopId,
-            args.productName || query
-          );
-        } else if (call.name === "propose_record_sale") {
-          toolResult = await executeProposeRecordSale(supabase, shopId, {
-            productName: args.productName || query,
-            quantity: Number(args.quantity) || 1,
-            unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
-            notes: args.notes,
-          });
-        } else if (call.name === "query_sales_history") {
-          toolResult = await executeGetSalesHistory(
-            supabase,
-            shopId,
-            args.dateQuery || query
-          );
-        } else if (call.name === "query_restock_orders") {
-          toolResult = await executeGetRestockOrdersSummary(
-            supabase,
-            shopId,
-            args.queryType || query
-          );
-        } else if (call.name === "propose_record_order_arrival") {
-          toolResult = await executeProposeRecordArrival(supabase, shopId, {
-            productName: args.productName,
-            orderNumber: args.orderNumber,
-            quantity: args.quantity ? Number(args.quantity) : undefined,
-          });
+          if (call.name === "find_product_location") {
+            toolResult = await executeFindLocation(supabase, shopId, args.productName || query);
+          } else if (call.name === "check_product_stock") {
+            toolResult = await executeCheckStock(supabase, shopId, args.productName || query);
+          } else if (call.name === "get_low_stock_products") {
+            toolResult = await executeGetLowStock(supabase, shopId);
+          } else if (call.name === "get_product_price_history") {
+            toolResult = await executeGetPriceHistory(supabase, shopId, args.productName || query);
+          } else if (call.name === "propose_stock_adjustment") {
+            toolResult = await executeProposeStockAdjustment(
+              supabase,
+              shopId,
+              args.productName || query,
+              args.quantityDelta || 0,
+              args.reason
+            );
+          } else if (call.name === "propose_create_product") {
+            toolResult = await executeProposeCreateProduct(supabase, shopId, {
+              productName: args.productName || query,
+              openingStock: args.openingStock !== undefined ? Number(args.openingStock) : 1,
+              sellingPrice: args.sellingPrice !== undefined ? Number(args.sellingPrice) : undefined,
+              costPrice: args.costPrice !== undefined ? Number(args.costPrice) : undefined,
+              category: args.category,
+              storageLocation: args.storageLocation,
+            });
+          } else if (call.name === "get_store_inventory_summary") {
+            toolResult = await executeGetInventorySummary(supabase, shopId);
+          } else if (call.name === "propose_update_product_location") {
+            toolResult = await executeProposeUpdateLocation(
+              supabase,
+              shopId,
+              args.productName || query,
+              args.newLocation || ""
+            );
+          } else if (call.name === "propose_update_product_price") {
+            toolResult = await executeProposeUpdatePrice(
+              supabase,
+              shopId,
+              args.productName || query,
+              Number(args.newPrice) || 0
+            );
+          } else if (call.name === "propose_delete_product") {
+            toolResult = await executeProposeDeleteProduct(
+              supabase,
+              shopId,
+              args.productName || query
+            );
+          } else if (call.name === "propose_record_sale") {
+            toolResult = await executeProposeRecordSale(supabase, shopId, {
+              items: args.items,
+              productName: args.productName || (!args.items ? query : undefined),
+              quantity: args.quantity ? Number(args.quantity) : undefined,
+              unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
+              notes: args.notes,
+            });
+          } else if (call.name === "update_slip_note") {
+            toolResult = await executeUpdateSlipNote(supabase, shopId, {
+              note: args.note,
+              slipNumber: args.slipNumber,
+              itemHint: args.itemHint,
+            });
+          } else if (call.name === "query_sales_history") {
+            toolResult = await executeGetSalesHistory(
+              supabase,
+              shopId,
+              args.dateQuery || "today"
+            );
+          } else if (call.name === "query_restock_orders") {
+            toolResult = await executeGetRestockOrdersSummary(
+              supabase,
+              shopId,
+              args.queryType || query
+            );
+          } else if (call.name === "propose_record_order_arrival") {
+            toolResult = await executeProposeRecordArrival(supabase, shopId, {
+              productName: args.productName,
+              orderNumber: args.orderNumber,
+              quantity: args.quantity ? Number(args.quantity) : undefined,
+            });
+          }
+
+          if (toolResult) {
+            results.push(toolResult);
+          }
         }
 
-        if (toolResult) {
+        if (results.length > 0) {
+          const mergedContent = results.map((r) => r.content).join("\n\n---\n\n");
+          const primaryResult = results[0];
+          const allPendingActions = results
+            .map((r) => r.pendingAction)
+            .filter(Boolean);
+
           const finalPayload: AssistantResponsePayload = {
             role: "assistant",
-            content: toolResult.content,
-            taskType: toolResult.taskType,
-            structuredData: toolResult.structuredData,
-            pendingAction: toolResult.pendingAction,
+            content: mergedContent,
+            taskType: primaryResult.taskType,
+            structuredData: primaryResult.structuredData,
+            pendingAction: allPendingActions[0] || null,
+            pendingActions: allPendingActions.length > 1 ? allPendingActions : null,
           };
 
           await (supabase.from("assistant_messages") as any).insert({
@@ -559,12 +641,15 @@ Rules:
               conversationId: conversationId || null,
               structuredData: finalPayload.structuredData || null,
               pendingAction: finalPayload.pendingAction || null,
+              pendingActions: finalPayload.pendingActions || null,
             },
           });
 
           return { success: true, message: finalPayload };
         }
       }
+
+
 
       // If no function call, return the model's text response
       const text = response.text || "I didn't quite catch that. You can ask: 'Where is [item]?', 'Stock of [item]?', 'What is low on stock?', or 'Price of [item]'";
@@ -932,57 +1017,95 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
     }
 
     if (actionType === "record_sale") {
-      const quantitySold = parseResult.data.quantity || 1;
-      const unitPriceSold =
-        parseResult.data.unitPrice !== undefined
-          ? parseResult.data.unitPrice
-          : sellingPrice !== undefined
-          ? sellingPrice
-          : 0;
-
+      const rawItems = parseResult.data.items;
+      const noteToSave = parseResult.data.notes || reason || "Recorded via Voice/Chat Assistant";
       const dateTag = new Date().toISOString().slice(2, 10).replace(/-/g, "");
       const randomSuffix = Math.floor(1000 + Math.random() * 9000);
       const slipNumber = `SLIP-${dateTag}-${randomSuffix}`;
       const idempotencyKey = `sale-${Date.now()}-${randomSuffix}`;
 
-      const slipLines = [
-        {
-          product_id: productId || null,
-          raw_item_name: productName,
-          quantity: quantitySold,
-          unit_price: unitPriceSold,
-          is_tracked: Boolean(productId),
-          status: productId ? "matched" : "untracked",
-        },
-      ];
+      let slipLines: Array<{
+        product_id: string | null;
+        raw_item_name: string;
+        quantity: number;
+        unit_price: number;
+        is_tracked: boolean;
+        status: string;
+      }> = [];
+      let totalEarned = 0;
+
+      if (rawItems && rawItems.length > 0) {
+        slipLines = rawItems.map((item) => ({
+          product_id: item.productId || null,
+          raw_item_name: item.productName,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          is_tracked: Boolean(item.productId),
+          status: item.productId ? "matched" : "untracked",
+        }));
+        totalEarned = rawItems.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0);
+      } else {
+        const quantitySold = parseResult.data.quantity || 1;
+        const unitPriceSold =
+          parseResult.data.unitPrice !== undefined
+            ? parseResult.data.unitPrice
+            : sellingPrice !== undefined
+            ? sellingPrice
+            : 0;
+        slipLines = [
+          {
+            product_id: productId || null,
+            raw_item_name: productName,
+            quantity: quantitySold,
+            unit_price: unitPriceSold,
+            is_tracked: Boolean(productId),
+            status: productId ? "matched" : "untracked",
+          },
+        ];
+        totalEarned = quantitySold * unitPriceSold;
+      }
 
       const { data: saleResult, error: saleErr } = await (supabase as any).rpc("record_sales_slip", {
         p_shop_id: shopId,
         p_slip_number: slipNumber,
         p_source: "manual",
-        p_notes: reason || "Recorded via Voice/Chat Assistant",
+        p_notes: noteToSave,
         p_idempotency_key: idempotencyKey,
         p_lines: slipLines,
       });
 
       if (saleErr) throw saleErr;
 
-      let updatedStockText = "";
-      if (productId) {
-        const { data: updatedProd } = await (supabase as any)
-          .from("products")
-          .select("current_stock")
-          .eq("id", productId)
-          .single();
-        if (updatedProd) {
-          updatedStockText = ` Naya stock **${updatedProd.current_stock} units** hai.`;
+      let confirmMsg = "";
+      if (rawItems && rawItems.length > 1) {
+        const itemsSummary = rawItems
+          .map((it) => `• **${it.quantity}x ${it.productName}** @ ₹${it.unitPrice} = ₹${it.quantity * it.unitPrice}`)
+          .join("\n");
+        const noteSummary = parseResult.data.notes ? `\n📝 Note: "${parseResult.data.notes}"` : "";
+        confirmMsg = `✅ **Sales Slip #${slipNumber} Recorded!** (Total: **₹${totalEarned}**)\n${itemsSummary}${noteSummary}\nInventory and earnings update ho gayi hain.`;
+      } else if (rawItems && rawItems.length === 1) {
+        const item = rawItems[0];
+        const noteSummary = parseResult.data.notes ? ` (Note: "${parseResult.data.notes}")` : "";
+        confirmMsg = item.productId
+          ? `✅ **Sale Recorded & Stock Deducted!** Slip #${slipNumber} (${item.quantity}x ${item.productName}, Total: ₹${totalEarned})${noteSummary}.`
+          : `✅ **Custom Sale Recorded!** **${item.quantity}x ${item.productName}** (Unlinked) ka slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned})${noteSummary}.`;
+      } else {
+        const quantitySold = parseResult.data.quantity || 1;
+        let updatedStockText = "";
+        if (productId) {
+          const { data: updatedProd } = await (supabase as any)
+            .from("products")
+            .select("current_stock")
+            .eq("id", productId)
+            .single();
+          if (updatedProd) {
+            updatedStockText = ` Naya stock **${updatedProd.current_stock} units** hai.`;
+          }
         }
+        confirmMsg = productId
+          ? `✅ **Sale Recorded & Stock Deducted!** Slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned}).${updatedStockText}`
+          : `✅ **Custom Sale Recorded!** **${quantitySold}x ${productName}** (Unlinked) ka slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned}). Ise slip history aur earnings mein record kar liya gaya hai.`;
       }
-
-      const totalEarned = quantitySold * unitPriceSold;
-      const confirmMsg = productId
-        ? `✅ **Sale Recorded & Stock Deducted!** Slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned}).${updatedStockText}`
-        : `✅ **Custom Sale Recorded!** **${quantitySold}x ${productName}** (Unlinked) ka slip #${slipNumber} create ho gaya hai (Total: ₹${totalEarned}). Ise slip history aur earnings mein record kar liya gaya hai.`;
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
@@ -992,12 +1115,14 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
         task_type: "record_sale",
         metadata: {
           confirmed: true,
-          productId,
+          productId: productId || null,
           productName,
-          quantity: quantitySold,
-          unitPrice: unitPriceSold,
+          quantity: rawItems && rawItems.length === 1 ? rawItems[0].quantity : parseResult.data.quantity || 1,
+          unitPrice: rawItems && rawItems.length === 1 ? rawItems[0].unitPrice : parseResult.data.unitPrice || 0,
           totalAmount: totalEarned,
           slipNumber,
+          notes: noteToSave,
+          items: rawItems || null,
         },
       });
 
@@ -1151,6 +1276,7 @@ export async function fetchAssistantConversationMessagesAction(
         taskType: m.task_type,
         structuredData: (m.metadata as any)?.structuredData,
         pendingAction: (m.metadata as any)?.pendingAction,
+        pendingActions: (m.metadata as any)?.pendingActions,
         createdAt: m.created_at,
       })),
     };

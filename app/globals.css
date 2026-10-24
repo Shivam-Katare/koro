@@ -144,6 +144,12 @@
   }
 }
 
+/* Receipt paper: scalloped bottom edge (colour follows the card surface) */
+.receipt-edge {
+  height: 10px;
+  background: radial-gradient(circle at 8px 10px, transparent 6px, var(--card) 6.5px) 0 0 / 16px 10px repeat-x;
+}
+
 /* Scrolls normally, never shows a scrollbar */
 .no-scrollbar {
   scrollbar-width: none;

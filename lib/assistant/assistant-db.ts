@@ -1,5 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+export type AssistantSaleLineItem = {
+  productId?: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  currentStock?: number | null;
+  newStock?: number | null;
+  isUnlinked?: boolean;
+  isOutOfStock?: boolean;
+};
+
 export type AssistantPendingAction = {
   actionType:
     | "adjust_stock"
@@ -24,11 +36,14 @@ export type AssistantPendingAction = {
   newLocation?: string;
   currentPrice?: number | null;
   newPrice?: number;
-  // For record_sale
+  // For record_sale (supports single and multi-item slips)
   quantity?: number;
   unitPrice?: number;
   totalAmount?: number;
   isUnlinked?: boolean;
+  hasOutOfStock?: boolean;
+  items?: AssistantSaleLineItem[];
+  notes?: string;
   // For record_order_arrival
   orderItemId?: string;
   orderNumber?: string;
@@ -64,14 +79,23 @@ export function resolveProductMatch(products: any[], query: string): {
   distinctNames: string[];
 } {
   const cleanQ = query.trim().toLowerCase();
+  const cleanQStem = cleanQ.replace(/(?:es|s)$/i, "");
+
   const matched = (products || []).filter((p: any) => {
     const pName = p.name.trim().toLowerCase();
-    return pName.includes(cleanQ) || cleanQ.includes(pName);
+    const pNameStem = pName.replace(/(?:es|s)$/i, "");
+    return (
+      pName === cleanQ ||
+      pName.includes(cleanQ) ||
+      cleanQ.includes(pName) ||
+      (cleanQStem.length > 2 && (pName.includes(cleanQStem) || cleanQStem.includes(pNameStem)))
+    );
   });
 
-  const exactMatches = matched.filter(
-    (p: any) => p.name.trim().toLowerCase() === cleanQ
-  );
+  const exactMatches = matched.filter((p: any) => {
+    const pName = p.name.trim().toLowerCase();
+    return pName === cleanQ || (cleanQStem.length > 2 && pName === cleanQStem);
+  });
 
   const distinctNames = Array.from(new Set(matched.map((m: any) => m.name.trim())));
 
@@ -732,122 +756,294 @@ export async function executeProposeDeleteProduct(
 }
 
 // -------------------------------------------------------------
-// Sales Recording Proposal ("Today I sold 5 Lakme items at 50")
+// Sales Recording Proposal ("Today I sold 4 Nivea, 3 Lakme, 2 chudis")
 // -------------------------------------------------------------
 export async function executeProposeRecordSale(
   supabase: any,
   shopId: string,
   params: {
-    productName: string;
+    productName?: string;
     quantity?: number;
     unitPrice?: number;
     notes?: string;
+    items?: Array<{
+      productName: string;
+      quantity?: number;
+      unitPrice?: number;
+    }>;
   }
 ): Promise<AssistantExecutionResult> {
-  const cleanName = params.productName.trim();
-  const quantity = params.quantity && params.quantity > 0 ? params.quantity : 1;
+  // Normalize items list (supports both items array and single item params)
+  let rawItems: Array<{ productName: string; quantity?: number; unitPrice?: number }> = [];
+  if (params.items && Array.isArray(params.items) && params.items.length > 0) {
+    rawItems = params.items.filter((i) => i && i.productName && i.productName.trim() !== "");
+  } else if (params.productName && params.productName.trim() !== "") {
+    rawItems = [
+      {
+        productName: params.productName.trim(),
+        quantity: params.quantity,
+        unitPrice: params.unitPrice,
+      },
+    ];
+  }
+
+  if (rawItems.length === 0) {
+    return {
+      content: "Kripya sale record karne ke liye product ka naam batayein (jaise: '2 Nivea cream, 1 Lakme').",
+      taskType: "record_sale",
+      pendingAction: null,
+    };
+  }
 
   const { data: products } = await supabase
     .from("products")
     .select("id, name, storage_location, selling_price, cost_price, current_stock, category")
     .eq("shop_id", shopId);
 
-  const resolution = resolveProductMatch(products || [], cleanName);
+  const processedLines: AssistantSaleLineItem[] = [];
+  const ambiguousItems: string[] = [];
+  let hasOutOfStock = false;
 
-  if (!resolution.bestMatch && resolution.matched.length === 0) {
-    // Uncataloged / Custom item: Retailers frequently sell unlinked items (e.g. bangles, loose goods, milk)
-    // We allow recording it as an Unlinked / Custom Item Sale without requiring prior catalog entry.
-    const unitPrice =
-      params.unitPrice !== undefined && params.unitPrice > 0
-        ? params.unitPrice
-        : 0;
-    const totalAmount = quantity * unitPrice;
-    const priceText =
-      unitPrice > 0
-        ? `₹${unitPrice} each (Total ₹${totalAmount})`
-        : "₹0 (Card par price enter kar sakte hain)";
+  for (const item of rawItems) {
+    const cleanName = item.productName.trim();
+    const qty = item.quantity && item.quantity > 0 ? item.quantity : 1;
+    const resolution = resolveProductMatch(products || [], cleanName);
 
-    return {
-      content: `"${cleanName}" inventory catalog mein nahi mila, lekin ise **Unlinked / Custom Sale** ke roop mein sales slip mein add kiya ja sakta hai:\n• Item: **${quantity}x ${cleanName}** (↔ Unlinked Item)\n• Price: **${priceText}**\n• Stock: *Uncataloged (No inventory stock deduction)*\n\nNiche confirm par tap karke ise sales slip aur earnings history mein add karein.`,
-      taskType: "record_sale",
-      structuredData: {
-        productId: null,
-        productName: cleanName,
-        quantity,
+    if (!resolution.bestMatch && resolution.distinctNames.length > 1) {
+      ambiguousItems.push(`"${cleanName}" (options: ${resolution.distinctNames.map((n) => `"${n}"`).join(", ")})`);
+      continue;
+    }
+
+    if (resolution.bestMatch) {
+      const p = resolution.bestMatch;
+      const currentStock = Number(p.current_stock) || 0;
+      const unitPrice =
+        item.unitPrice !== undefined && item.unitPrice > 0
+          ? item.unitPrice
+          : p.selling_price !== null && p.selling_price !== undefined
+          ? Number(p.selling_price)
+          : 0;
+      const lineTotal = qty * unitPrice;
+      const isOutOfStock = currentStock <= 0;
+      if (isOutOfStock) hasOutOfStock = true;
+      const newStock = Math.max(0, currentStock - qty);
+
+      processedLines.push({
+        productId: p.id,
+        productName: p.name,
+        quantity: qty,
         unitPrice,
-        totalAmount,
-        currentStock: null,
-        newStock: null,
-        isUnlinked: true,
-      },
-      pendingAction: {
-        actionType: "record_sale",
+        lineTotal,
+        currentStock,
+        newStock,
+        isUnlinked: false,
+        isOutOfStock,
+      });
+    } else {
+      // Uncataloged / Custom item: Retailers frequently sell unlinked items (e.g. bangles, loose goods, milk)
+      const unitPrice = item.unitPrice !== undefined && item.unitPrice > 0 ? item.unitPrice : 0;
+      const lineTotal = qty * unitPrice;
+
+      processedLines.push({
         productId: undefined,
         productName: cleanName,
-        quantity,
+        quantity: qty,
         unitPrice,
-        totalAmount,
+        lineTotal,
         currentStock: null,
         newStock: null,
         isUnlinked: true,
-        reason: params.notes || "Unlinked/Custom Counter Sale",
-      },
-    };
+        isOutOfStock: false,
+      });
+    }
   }
 
-  if (!resolution.bestMatch && resolution.distinctNames.length > 1) {
-    const names = resolution.distinctNames.map((n) => `"${n}"`).join(", ");
+  if (ambiguousItems.length > 0) {
     return {
-      content: `Aapke paas multiple milte-julte items hain: ${names}. Kripya exact product batayein jo aapne becha hai.`,
+      content: `Aapke paas multiple milte-julte items hain: ${ambiguousItems.join("; ")}. Kripya exact product batayein jo aapne becha hai.`,
       taskType: "record_sale",
-      structuredData: { ambiguous: true, options: resolution.distinctNames },
+      structuredData: { ambiguous: true },
       pendingAction: null,
     };
   }
 
-  const p = resolution.bestMatch!;
-  const currentStock = Number(p.current_stock) || 0;
-  const unitPrice =
-    params.unitPrice !== undefined && params.unitPrice > 0
-      ? params.unitPrice
-      : p.selling_price !== null && p.selling_price !== undefined
-      ? Number(p.selling_price)
-      : 0;
+  const totalAmount = processedLines.reduce((sum, l) => sum + l.lineTotal, 0);
+  const totalUnits = processedLines.reduce((sum, l) => sum + l.quantity, 0);
 
-  const totalAmount = quantity * unitPrice;
-  const newStock = Math.max(0, currentStock - quantity);
+  const linesListMarkdown = processedLines
+    .map((l) => {
+      const priceStr = l.unitPrice > 0 ? `₹${l.unitPrice} each = ₹${l.lineTotal}` : "₹0";
+      const stockStr = l.isUnlinked
+        ? "(↔ Unlinked Item)"
+        : l.isOutOfStock
+        ? "(⚠️ Out of Stock — 0 in system)"
+        : `(Stock: ${l.currentStock} ➔ ${l.newStock} units)`;
+      return `• **${l.quantity}x ${l.productName}** — ${priceStr} ${stockStr}`;
+    })
+    .join("\n");
 
-  let warning = "";
-  if (currentStock < quantity) {
-    warning = ` (⚠️ Note: Current stock is only ${currentStock} units; selling ${quantity} will deplete stock to 0).`;
+  let outOfStockAlert = "";
+  if (hasOutOfStock) {
+    const oosNames = processedLines
+      .filter((l) => l.isOutOfStock)
+      .map((l) => l.productName)
+      .join(", ");
+    outOfStockAlert = `\n⚠️ **Stock Awareness:** **${oosNames}** system inventory mein out of stock (0 units) hai, lekin dukaan ke liye sales slip taiyaar kar di hai.`;
   }
 
-  const priceText = unitPrice > 0 ? `₹${unitPrice} each, Total ₹${totalAmount}` : `Total ₹${totalAmount}`;
+  const noteMarkdown = params.notes ? `\n• Note: **"${params.notes}"**` : "";
+
+  const title =
+    processedLines.length > 1
+      ? `**Counter Sales Slip (${processedLines.length} items)**:`
+      : `**Sale Slip Details**:`;
+
+  const content = `${title}\n${linesListMarkdown}\n• **Total Bill: ₹${totalAmount.toLocaleString("en-IN")}** (${totalUnits} total units)${noteMarkdown}${outOfStockAlert}\n\nNiche confirm par tap karke slip generate karein aur stock update karein.`;
+
+  const primaryItem = processedLines[0];
+
+  const pendingAction: AssistantPendingAction = {
+    actionType: "record_sale",
+    productId: processedLines.length === 1 ? primaryItem.productId : undefined,
+    productName:
+      processedLines.length === 1
+        ? primaryItem.productName
+        : `${processedLines.length} items (${processedLines.map((i) => i.productName).slice(0, 2).join(", ")}${processedLines.length > 2 ? "..." : ""})`,
+    quantity: totalUnits,
+    unitPrice: processedLines.length === 1 ? primaryItem.unitPrice : undefined,
+    totalAmount,
+    currentStock: processedLines.length === 1 ? primaryItem.currentStock : null,
+    newStock: processedLines.length === 1 ? primaryItem.newStock : null,
+    isUnlinked: processedLines.every((l) => l.isUnlinked),
+    hasOutOfStock,
+    items: processedLines,
+    notes: params.notes,
+    reason: params.notes || "counter_sale",
+  };
 
   return {
-    content: `Sale record karne ke liye details taiyaar hain:\n• Item: **${quantity}x ${p.name}**\n• Price: **${priceText}**\n• Stock update: **${currentStock} ➔ ${newStock} units**${warning}\n\nConfirm par tap karke sales slip generate karein aur stock deduct karein.`,
+    content,
     taskType: "record_sale",
     structuredData: {
-      productId: p.id,
-      productName: p.name,
-      quantity,
-      unitPrice,
+      items: processedLines,
       totalAmount,
-      currentStock,
-      newStock,
+      totalUnits,
+      hasOutOfStock,
+      notes: params.notes,
     },
-    pendingAction: {
-      actionType: "record_sale",
-      productId: p.id,
-      productName: p.name,
-      quantity,
-      unitPrice,
-      totalAmount,
-      currentStock,
-      newStock,
-      isUnlinked: false,
-      reason: params.notes || "counter_sale",
+    pendingAction,
+  };
+}
+
+// -------------------------------------------------------------
+// Update Slip Note (e.g. "For the recent slip add note: udhar of ₹50")
+// -------------------------------------------------------------
+export async function executeUpdateSlipNote(
+  supabase: any,
+  shopId: string,
+  params: {
+    note: string;
+    slipNumber?: string;
+    itemHint?: string;
+  }
+): Promise<AssistantExecutionResult> {
+  const cleanNote = (params.note || "").trim();
+  if (!cleanNote) {
+    return {
+      content: "Kripya slip mein add karne ke liye note batayein (jaise: 'Udhar ₹50', 'Ramesh bhai').",
+      taskType: "general",
+      pendingAction: null,
+    };
+  }
+
+  let targetSlip: any = null;
+
+  // 1. If slipNumber provided, find by slip_number
+  if (params.slipNumber && params.slipNumber.trim()) {
+    const rawNum = params.slipNumber.trim();
+    const { data: matchedSlips } = await (supabase.from("sales_slips") as any)
+      .select("id, slip_number, total_amount, notes, created_at")
+      .eq("shop_id", shopId)
+      .ilike("slip_number", `%${rawNum}%`)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (matchedSlips && matchedSlips.length > 0) {
+      targetSlip = matchedSlips[0];
+    }
+  }
+
+  // 2. If no slipNumber or not found, but itemHint provided (e.g. "for chudi", "nivea")
+  if (!targetSlip && params.itemHint && params.itemHint.trim()) {
+    const hint = params.itemHint.trim().toLowerCase();
+    const { data: matchedLines } = await (supabase.from("sales_slip_lines") as any)
+      .select("slip_id, raw_item_name, created_at")
+      .eq("shop_id", shopId)
+      .ilike("raw_item_name", `%${hint}%`)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (matchedLines && matchedLines.length > 0) {
+      const { data: slipData } = await (supabase.from("sales_slips") as any)
+        .select("id, slip_number, total_amount, notes, created_at")
+        .eq("id", matchedLines[0].slip_id)
+        .single();
+      if (slipData) {
+        targetSlip = slipData;
+      }
+    }
+  }
+
+  // 3. Fallback: Most recent slip of this shop
+  if (!targetSlip) {
+    const { data: recentSlips } = await (supabase.from("sales_slips") as any)
+      .select("id, slip_number, total_amount, notes, created_at")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (recentSlips && recentSlips.length > 0) {
+      targetSlip = recentSlips[0];
+    }
+  }
+
+  if (!targetSlip) {
+    return {
+      content: "Aapki shop mein koi sales slip nahi mila jisme note update kiya ja sake.",
+      taskType: "general",
+      pendingAction: null,
+    };
+  }
+
+  const updatedNote = targetSlip.notes
+    ? `${targetSlip.notes} | ${cleanNote}`
+    : cleanNote;
+
+  const { error: updateErr } = await (supabase.from("sales_slips") as any)
+    .update({ notes: updatedNote, updated_at: new Date().toISOString() })
+    .eq("id", targetSlip.id)
+    .eq("shop_id", shopId);
+
+  if (updateErr) {
+    return {
+      content: `Slip note update karne mein error aayi: ${updateErr.message}`,
+      taskType: "general",
+      pendingAction: null,
+    };
+  }
+
+  const content = `✅ **Slip Note Updated!**\n• Slip: **#${targetSlip.slip_number}** (Total ₹${targetSlip.total_amount})\n• Note Added: **"${cleanNote}"**\nSlip history mein note darj kar diya gaya hai.`;
+
+  return {
+    content,
+    taskType: "general",
+    structuredData: {
+      slipId: targetSlip.id,
+      slipNumber: targetSlip.slip_number,
+      note: cleanNote,
+      totalAmount: targetSlip.total_amount,
     },
+    pendingAction: null,
   };
 }
 
@@ -1208,6 +1404,133 @@ export async function executeProposeRecordArrival(
 }
 
 // -------------------------------------------------------------
+// Helper: Parse multi-item sales from conversational sentences
+// Examples: "Today I sold 4 Nivea creams, 3 Lakme Kajals, and 2 chudis", "2 Nivea creams, 1 Lakme of ₹50, and the ₹20 one"
+// -------------------------------------------------------------
+export function parseMultiItemSaleText(text: string): AssistantSaleLineItem[] | null {
+  const clean = text.trim();
+  const lower = clean.toLowerCase();
+
+  // Exclude note updates, restock queries, earnings queries, locations, or inventory checks
+  if (
+    lower.includes("note") ||
+    lower.includes("udhar") ||
+    lower.includes("order") ||
+    lower.includes("arrived") ||
+    lower.includes("how much") ||
+    lower.includes("kitna") ||
+    lower.includes("kitni") ||
+    lower.includes("history") ||
+    lower.includes("where is") ||
+    lower.includes("kahan") ||
+    lower.includes("check stock")
+  ) {
+    return null;
+  }
+
+  // Must contain an explicit sale verb or slip-creation phrase
+  const isSaleQuery =
+    /\b(?:sold|sell|sale|becha|beche|bechi|bika|biki|bikri)\b/i.test(clean) ||
+    /(?:add\s+to\s+(?:a\s+)?slip|added\s+to\s+(?:a\s+)?slip|slip\s+(?:me|mein)\s+daal|slip\s+banao|slip\s+create)/i.test(clean);
+
+  if (!isSaleQuery) {
+    return null;
+  }
+
+  const stripped = clean
+    .replace(/^(?:today\s+)?(?:i\s+)?sold\s+/i, "")
+    .replace(/^(?:aaj\s+)?(?:maine\s+|mene\s+|humne\s+)?(?:abhi[- ]abhi\s+)?/i, "")
+    .replace(/(?:\s+(?:bechi|becha|beche|bika|biki|sell kiya|sale kiya)(?:\s+hai|\s+tha)?)+$/i, "")
+    .replace(/(?:\s+(?:use\s+)?(?:sale|slip)(?:\s+me|\s+mein)?\s+(?:add|daal)(?:\s+kar|\s+karo|\s+karein|\s+kar do)?)+$/i, "")
+    .replace(/(?:\s+(?:added\s+to\s+a?\s*slip|add\s+to\s+a?\s*slip))+$/i, "")
+    .trim();
+
+  if (!/[,&+]|\band\b|\baur\b/i.test(stripped)) {
+    return null;
+  }
+
+  const segments = stripped.split(/,\s*(?:and\s+|aur\s+)?|\s+and\s+|\s+aur\s+|[+&]/i);
+  if (segments.length < 2) return null;
+
+  const wordNumbers: Record<string, number> = {
+    one: 1, ek: 1,
+    two: 2, do: 2,
+    three: 3, teen: 3,
+    four: 4, char: 4,
+    five: 5, panch: 5,
+    six: 6, chheh: 6,
+    seven: 7, saat: 7,
+    eight: 8, aath: 8,
+    nine: 9, nau: 9,
+    ten: 10, das: 10,
+  };
+
+  const items: AssistantSaleLineItem[] = [];
+
+  for (const rawSeg of segments) {
+    let seg = rawSeg.trim();
+    if (!seg) continue;
+
+    let qty = 1;
+    let unitPrice: number | undefined = undefined;
+
+    const priceOneMatch =
+      seg.match(/^(?:the\s+)?(?:₹|rs\.?)\s*(\d+(?:\.\d+)?)\s*(?:one|waala|wala)?$/i) ||
+      seg.match(/^(?:the\s+)?(\d+(?:\.\d+)?)\s*(?:rupaye|rs\.?|₹)?\s*(?:one|waala|wala)$/i);
+
+    if (priceOneMatch) {
+      unitPrice = parseFloat(priceOneMatch[1]);
+      items.push({
+        productName: `Item @ ₹${unitPrice}`,
+        quantity: 1,
+        unitPrice,
+        lineTotal: unitPrice,
+      });
+      continue;
+    }
+
+    const priceMatch = seg.match(/(?:of|at|@|for|rs\.?|₹|me|mein|rupaye me)\s*(?:₹|rs\.?)?\s*(\d+(?:\.\d+)?)/i);
+    if (priceMatch) {
+      unitPrice = parseFloat(priceMatch[1]);
+      seg = seg.replace(/(?:of|at|@|for|rs\.?|₹|me|mein|rupaye me)\s*(?:₹|rs\.?)?\s*(\d+(?:\.\d+)?)/gi, "").trim();
+    }
+
+    const wordQtyMatch = seg.match(/^(one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|panch|chheh|saat|aath|nau|das)\s+(.+)/i);
+    const leadingQtyMatch = seg.match(/^(\d+(?:\.\d+)?)\s*(?:x|\*|\-|\:)?\s*(.+)/i);
+
+    if (leadingQtyMatch) {
+      qty = parseInt(leadingQtyMatch[1], 10) || 1;
+      seg = leadingQtyMatch[2].trim();
+    } else if (wordQtyMatch) {
+      qty = wordNumbers[wordQtyMatch[1].toLowerCase()] || 1;
+      seg = wordQtyMatch[2].trim();
+    } else {
+      const trailingQtyMatch = seg.match(/^(.+?)\s+(\d+)\s*(?:pcs?|units?|items?|pieces?|piece|packets?)?$/i);
+      if (trailingQtyMatch) {
+        seg = trailingQtyMatch[1].trim();
+        qty = parseInt(trailingQtyMatch[2], 10) || 1;
+      }
+    }
+
+    seg = seg
+      .replace(/^(?:of\s+)/i, "")
+      .replace(/\s+(?:items?|units?|pieces?|piece|packets?)$/i, "")
+      .trim();
+
+    if (seg.length > 0) {
+      items.push({
+        productName: seg,
+        quantity: qty,
+        unitPrice: unitPrice !== undefined ? unitPrice : 0,
+        lineTotal: qty * (unitPrice !== undefined ? unitPrice : 0),
+      });
+    }
+  }
+
+  return items.length >= 2 ? items : null;
+}
+
+// -------------------------------------------------------------
 // Fast Local Intent Matcher (0 Tokens, Zero-Latency Fallback)
 // -------------------------------------------------------------
 export function matchLocalIntent(query: string) {
@@ -1229,65 +1552,87 @@ export function matchLocalIntent(query: string) {
     }
   }
 
-  // 2. Sales recording: "today i sold 5 lakme items", "sold 5 lakme at 50", "5 lakme beche"
-  const saleMatch1 = q.match(/(?:today )?(?:i )?sold (\d+) (?:units |packets |pieces |items )?(?:of )?(.+?)(?: at | for | @ | me | mein )?(?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)?$/i);
-  if (saleMatch1) {
-    const qty = parseInt(saleMatch1[1], 10);
-    const prod = saleMatch1[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim();
-    const price = saleMatch1[3] ? parseFloat(saleMatch1[3]) : undefined;
-    return { intent: "record_sale", quantity: qty, target: prod, unitPrice: price };
+  // 2a. Multi-item sales recording: "today i sold 4 nivea creams, 3 lakme kajals, and 2 chudis"
+  const multiItems = parseMultiItemSaleText(q);
+  if (multiItems && multiItems.length >= 2) {
+    return { intent: "record_sale", items: multiItems };
   }
 
-  const saleMatch2 = q.match(/(\d+) (.+?) (?:beche|becha|sell kiya|sale kiya)/i);
-  if (saleMatch2) {
-    const qty = parseInt(saleMatch2[1], 10);
-    const prod = saleMatch2[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim();
-    return { intent: "record_sale", quantity: qty, target: prod };
+  // Guard against treating multi-item sentences as a single product:
+  // If query contains comma or "and"/"aur" and mentions multiple items/quantities, do NOT match single-item regex!
+  const hasMultipleItemsPattern =
+    /[,\+]|\band\b|\baur\b/.test(q) &&
+    (q.match(/\d+|one|two|three|four|five|ek|do|teen|char|panch/gi) || []).length >= 2;
+
+  if (!hasMultipleItemsPattern) {
+    // 2b. Single item sales recording: "today i sold 5 lakme items", "sold 5 lakme at 50", "5 lakme beche"
+    const saleMatch1 = q.match(/(?:today )?(?:i )?sold (\d+) (?:units |packets |pieces |items )?(?:of )?(.+?)(?: at | for | @ | me | mein )?(?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)?$/i);
+    if (saleMatch1) {
+      const qty = parseInt(saleMatch1[1], 10);
+      const prod = saleMatch1[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim();
+      const price = saleMatch1[3] ? parseFloat(saleMatch1[3]) : undefined;
+      return { intent: "record_sale", quantity: qty, target: prod, unitPrice: price };
+    }
+
+    const saleMatch2 = q.match(/(\d+) (.+?) (?:beche|becha|sell kiya|sale kiya)/i);
+    if (saleMatch2) {
+      const qty = parseInt(saleMatch2[1], 10);
+      const prod = saleMatch2[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim();
+      return { intent: "record_sale", quantity: qty, target: prod };
+    }
+
+    // 2c. Hindi / Hinglish sales: "maine abhi-abhi ... bechi hai", "use sale me add kar"
+    const hindiSaleMatch = q.match(/(?:maine |mene |humne )?(?:abhi[- ]abhi )?(.+?) (?:bechi|becha|beche|bika|biki|sell kiya|sale kiya)(?: hai| tha)?/i);
+    if (hindiSaleMatch) {
+      let rawItem = hindiSaleMatch[1]
+        .replace(/^(?:aaj |today |abhi[- ]abhi |maine |mene )+/gi, "")
+        .replace(/use sale me add kar.*|use sale mein.*|sale me add kar.*|sale mein daal.*/gi, "")
+        .trim();
+      let qty = 1;
+      const qtyMatch = rawItem.match(/^(\d+)\s+(.+)/);
+      if (qtyMatch) {
+        qty = parseInt(qtyMatch[1], 10);
+        rawItem = qtyMatch[2];
+      }
+      let unitPrice: number | undefined = undefined;
+      const priceMatch = rawItem.match(/(?:for|at|rs\.?|₹|rupaye me|me|mein)\s*(\d+(?:\.\d+)?)/i);
+      if (priceMatch) {
+        unitPrice = parseFloat(priceMatch[1]);
+        rawItem = rawItem.replace(/(?:for|at|rs\.?|₹|rupaye me|me|mein)\s*(\d+(?:\.\d+)?)/gi, "").trim();
+      }
+      if (rawItem.length > 1) {
+        return { intent: "record_sale", quantity: qty, target: rawItem, unitPrice };
+      }
+    }
+
+    // 2d. Explicit add to sale: "add to sale...", "sale me add kar...", "use sale me add kar"
+    const saleAddMatch = q.match(/(?:add to sale|sale me add|sale mein add|bikri me add|sale me daal|sale mein daal|use sale me add) (?:kar |karo |kar do |karein )?(.+)/i);
+    if (saleAddMatch) {
+      let rawItem = saleAddMatch[1].trim();
+      let qty = 1;
+      const qtyMatch = rawItem.match(/^(\d+)\s+(.+)/);
+      if (qtyMatch) {
+        qty = parseInt(qtyMatch[1], 10);
+        rawItem = qtyMatch[2];
+      }
+      return { intent: "record_sale", quantity: qty, target: rawItem };
+    }
   }
 
-  // 2c. Hindi / Hinglish sales: "maine abhi-abhi ... bechi hai", "use sale me add kar"
-  const hindiSaleMatch = q.match(/(?:maine |mene |humne )?(?:abhi[- ]abhi )?(.+?) (?:bechi|becha|beche|bika|biki|sell kiya|sale kiya)(?: hai| tha)?/i);
-  if (hindiSaleMatch) {
-    let rawItem = hindiSaleMatch[1]
-      .replace(/^(?:aaj |today |abhi[- ]abhi |maine |mene )+/gi, "")
-      .replace(/use sale me add kar.*|use sale mein.*|sale me add kar.*|sale mein daal.*/gi, "")
-      .trim();
-    let qty = 1;
-    const qtyMatch = rawItem.match(/^(\d+)\s+(.+)/);
-    if (qtyMatch) {
-      qty = parseInt(qtyMatch[1], 10);
-      rawItem = qtyMatch[2];
-    }
-    let unitPrice: number | undefined = undefined;
-    const priceMatch = rawItem.match(/(?:for|at|rs\.?|₹|rupaye me|me|mein)\s*(\d+(?:\.\d+)?)/i);
-    if (priceMatch) {
-      unitPrice = parseFloat(priceMatch[1]);
-      rawItem = rawItem.replace(/(?:for|at|rs\.?|₹|rupaye me|me|mein)\s*(\d+(?:\.\d+)?)/gi, "").trim();
-    }
-    if (rawItem.length > 1) {
-      return { intent: "record_sale", quantity: qty, target: rawItem, unitPrice };
-    }
-  }
-
-  // 2d. Explicit add to sale: "add to sale...", "sale me add kar...", "use sale me add kar"
-  const saleAddMatch = q.match(/(?:add to sale|sale me add|sale mein add|bikri me add|sale me daal|sale mein daal|use sale me add) (?:kar |karo |kar do |karein )?(.+)/i);
-  if (saleAddMatch) {
-    let rawItem = saleAddMatch[1].trim();
-    let qty = 1;
-    const qtyMatch = rawItem.match(/^(\d+)\s+(.+)/);
-    if (qtyMatch) {
-      qty = parseInt(qtyMatch[1], 10);
-      rawItem = qtyMatch[2];
-    }
-    return { intent: "record_sale", quantity: qty, target: rawItem };
-  }
-
-  // 3. Sales History & Earnings: "on 20th january 2026 how much money did i earn", "how much sales happened on 20th january", "today sales", "kitni sale hui"
+  // 3. Sales History & Earnings: "on 20th january 2026 how much money did i earn", "how much money did i sell", "total sales", "today sales"
   if (
     q.includes("how much money did i earn") ||
+    q.includes("how much money did i sell") ||
+    q.includes("how much did i sell") ||
+    q.includes("how much did i earn") ||
+    q.includes("how much i sold") ||
     q.includes("how much sales") ||
+    q.includes("total sale") ||
+    q.includes("total sales") ||
     q.includes("kitni kamai") ||
     q.includes("kitni sale") ||
+    q.includes("kitna bika") ||
+    q.includes("kitne ka samaan bika") ||
     q.includes("sales happened") ||
     q.startsWith("sales on ") ||
     q.startsWith("earnings on ") ||
@@ -1295,17 +1640,61 @@ export function matchLocalIntent(query: string) {
     q.includes("today's sales") ||
     q.includes("aaj ki sale")
   ) {
-    // Extract date if present
     let datePart = "";
     const onDateMatch = q.match(/(?:on |for |tarikh )([0-9a-zA-Z\s\/\-]+)/i);
     if (onDateMatch) {
       datePart = onDateMatch[1].replace(/how much.+|kitni.+|\?/gi, "").trim();
     } else if (q.includes("yesterday") || q.includes("kal")) {
       datePart = "yesterday";
+    } else if (q.includes("this month") || q.includes("is mahine")) {
+      datePart = "this month";
+    } else if (q.includes("this week") || q.includes("is hafte")) {
+      datePart = "this week";
     } else {
       datePart = "today";
     }
     return { intent: "sales_history", dateQuery: datePart };
+  }
+
+  // 3b. Update Slip Note (e.g. "for recent slip add note: udhar of ₹50", "slip me note add karo")
+  if (
+    q.includes("add note") ||
+    q.includes("note add") ||
+    q.includes("update note") ||
+    q.includes("note update") ||
+    q.includes("add a note") ||
+    q.includes("slip note") ||
+    q.includes("udhar note")
+  ) {
+    let noteText = "";
+    const noteMatch = q.match(/(?:note as well,? like |note: |note add karo:? |note daal do:? |note |add a note:? )(.+)/i);
+    if (noteMatch) {
+      noteText = noteMatch[1].replace(/^it'?s (?:an? )?/i, "").replace(/^like /i, "").trim();
+    }
+
+    let slipNum = "";
+    const slipNumMatch = q.match(/(?:slip number\s*(?:is\s*|hai\s*|:\s*)?|slip no\.?\s*(?:is\s*|:\s*)?|slip\s*#\s*)([a-zA-Z0-9\-]+)/i);
+    if (slipNumMatch && !["is", "was", "hai", "that", "the"].includes(slipNumMatch[1].toLowerCase())) {
+      slipNum = slipNumMatch[1].trim();
+    } else {
+      const standaloneSlip = q.match(/\b(SLIP-[0-9A-Z\-]+|\d{4,10})\b/i);
+      if (standaloneSlip) {
+        slipNum = standaloneSlip[1];
+      }
+    }
+
+    let itemHint = "";
+    const itemHintMatch = q.match(/(?:for |ke liye )(?:the )?(?:recent )?(?:slip (?:that you (?:have )?created )?(?:for )?)?([a-zA-Z0-9]+)/i);
+    if (itemHintMatch && !["the", "recent", "slip"].includes(itemHintMatch[1].toLowerCase())) {
+      itemHint = itemHintMatch[1].trim();
+    }
+
+    return {
+      intent: "update_slip_note",
+      note: noteText || q,
+      slipNumber: slipNum || undefined,
+      itemHint: itemHint || undefined,
+    };
   }
 
   // 4. Restock Queries

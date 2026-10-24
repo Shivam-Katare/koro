@@ -46,6 +46,22 @@ export const confirmAssistantActionSchema = z.object({
   unitPrice: z.number().nonnegative().optional(),
   totalAmount: z.number().nonnegative().optional(),
   isUnlinked: z.boolean().optional(),
+  items: z
+    .array(
+      z.object({
+        productId: z.string().uuid().optional(),
+        productName: z.string().min(1),
+        quantity: z.number().int().positive(),
+        unitPrice: z.number().nonnegative(),
+        lineTotal: z.number().nonnegative().optional(),
+        currentStock: z.number().nullable().optional(),
+        newStock: z.number().nullable().optional(),
+        isUnlinked: z.boolean().optional(),
+        isOutOfStock: z.boolean().optional(),
+      })
+    )
+    .optional(),
+  notes: z.string().optional(),
   // For record_order_arrival
   orderItemId: z.string().uuid().optional(),
   orderNumber: z.string().optional(),

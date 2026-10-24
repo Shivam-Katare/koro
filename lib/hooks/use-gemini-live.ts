@@ -57,6 +57,7 @@ export function useGeminiLive({
   const playerRef = useRef<AudioPlayer | null>(null);
   const lastUserTextRef = useRef("");
   const lastAssistantTextRef = useRef("");
+  const pendingActionRef = useRef<any | null>(null);
 
   const stopSession = useCallback(() => {
     // 1. Close Live WebSocket Session
@@ -89,6 +90,8 @@ export function useGeminiLive({
     setAssistantTranscript("");
     lastUserTextRef.current = "";
     lastAssistantTextRef.current = "";
+    pendingActionRef.current = null;
+    setPendingAction(null);
   }, []);
 
   const startSession = useCallback(async () => {
@@ -171,14 +174,51 @@ export function useGeminiLive({
               setStatus("processing");
               const functionResponses: any[] = [];
 
+              const executedActionsInTurn: any[] = [];
+
               for (const fc of message.toolCall.functionCalls) {
                 const callId = fc.id || "";
                 const callName = fc.name || "";
+                const fcArgs = (fc.args as Record<string, any>) || {};
+
+                // Deduplication Guard: If a multi-item sale slip was already proposed in this turn,
+                // check if this call is an accidental duplicate for one of those same items.
+                const multiItemSale = executedActionsInTurn.find(
+                  (a) => a.actionType === "record_sale" && a.items && a.items.length > 1
+                );
+
+                if (multiItemSale) {
+                  const checkName = (fcArgs.productName || "").trim().toLowerCase();
+                  const isItemAlreadyInMultiSlip =
+                    checkName &&
+                    multiItemSale.items.some(
+                      (it: any) =>
+                        it.productName.toLowerCase().includes(checkName) ||
+                        checkName.includes(it.productName.toLowerCase())
+                    );
+
+                  if (
+                    isItemAlreadyInMultiSlip &&
+                    (callName === "propose_record_sale" || callName === "propose_stock_adjustment")
+                  ) {
+                    // Return positive acknowledgment to Gemini without creating a redundant duplicate slip
+                    functionResponses.push({
+                      id: callId,
+                      name: callName,
+                      response: {
+                        success: true,
+                        message: `Item "${fcArgs.productName}" is already included in the active sales slip with ${multiItemSale.items.length} items.`,
+                      },
+                    });
+                    continue;
+                  }
+                }
+
                 try {
                   const execResult = await executeLiveToolCallAction({
                     shopId,
                     toolName: callName,
-                    args: (fc.args as Record<string, any>) || {},
+                    args: fcArgs,
                   });
 
                   if (execResult.success) {
@@ -190,6 +230,8 @@ export function useGeminiLive({
 
                     // If a stock adjustment was proposed, pop up confirmation card
                     if (execResult.pendingAction) {
+                      executedActionsInTurn.push(execResult.pendingAction);
+                      pendingActionRef.current = execResult.pendingAction;
                       setPendingAction(execResult.pendingAction);
                       if (onStockAdjustmentProposed) {
                         onStockAdjustmentProposed(execResult.pendingAction);
@@ -264,6 +306,9 @@ export function useGeminiLive({
                 if (lastUserTextRef.current || lastAssistantTextRef.current) {
                   const userText = lastUserTextRef.current;
                   const assistantText = lastAssistantTextRef.current;
+                  const actionForTurn = pendingActionRef.current;
+                  pendingActionRef.current = null;
+                  setPendingAction(null);
 
                   setHistory((prev) => [
                     ...prev,
@@ -284,7 +329,7 @@ export function useGeminiLive({
                             role: "assistant" as const,
                             text: assistantText,
                             timestamp: timeStr,
-                            pendingAction: pendingAction || undefined,
+                            pendingAction: actionForTurn || undefined,
                           },
                         ]
                       : []),
@@ -296,14 +341,14 @@ export function useGeminiLive({
                     conversationId: conversationId || undefined,
                     userText,
                     assistantText,
-                    pendingAction,
+                    pendingAction: actionForTurn,
                   });
 
                   if (onTurnComplete) {
                     onTurnComplete({
                       userText,
                       assistantText,
-                      pendingAction,
+                      pendingAction: actionForTurn,
                     });
                   }
 

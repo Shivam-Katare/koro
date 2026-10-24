@@ -141,6 +141,7 @@ export function AssistantChatDrawer({
       taskType?: string | null;
       structuredData?: any;
       pendingAction?: any;
+      pendingActions?: any[] | null;
     }>
   >([]);
   const [isHistoryViewOpen, setIsHistoryViewOpen] = useState(false);
@@ -189,6 +190,8 @@ export function AssistantChatDrawer({
     [shop?.id]
   );
 
+  const liveActionProposedInTurnRef = useRef<boolean>(false);
+
   // Gemini Live Hook directly integrated into the drawer workspace
   const {
     status: liveStatus,
@@ -205,28 +208,72 @@ export function AssistantChatDrawer({
     shopId: shop?.id || null,
     conversationId: activeConversationId,
     onTurnComplete: (turn) => {
-      // Append completed live turn to activeMessages (single occurrence, no duplicates)
-      setActiveMessages((prev) => [
-        ...prev,
-        ...(turn.userText ? [{ role: "user" as const, content: turn.userText }] : []),
-        ...(turn.assistantText
-          ? [
-              {
-                role: "assistant" as const,
+      setActiveMessages((prev) => {
+        const next = [...prev];
+
+        // 1. If userText was spoken during this turn:
+        if (turn.userText) {
+          if (liveActionProposedInTurnRef.current) {
+            // Find the last assistant card message that was added during this turn
+            const lastAssistantCardIdx = next.length - 1;
+            if (
+              lastAssistantCardIdx >= 0 &&
+              next[lastAssistantCardIdx].role === "assistant" &&
+              next[lastAssistantCardIdx].pendingAction
+            ) {
+              // Insert user speech before the action card so order is User -> Assistant Card
+              next.splice(lastAssistantCardIdx, 0, {
+                role: "user" as const,
+                content: turn.userText,
+              });
+            } else {
+              next.push({ role: "user" as const, content: turn.userText });
+            }
+          } else {
+            next.push({ role: "user" as const, content: turn.userText });
+          }
+        }
+
+        // 2. If assistantText was spoken:
+        if (turn.assistantText) {
+          if (liveActionProposedInTurnRef.current) {
+            // Card was already created by onStockAdjustmentProposed!
+            // Update the card message's text with Koro's spoken answer so there is NO DUPLICATE CARD!
+            const lastAssistantCardIdx = [...next]
+              .reverse()
+              .findIndex((m) => m.role === "assistant" && m.pendingAction);
+
+            if (lastAssistantCardIdx !== -1) {
+              const actualIdx = next.length - 1 - lastAssistantCardIdx;
+              next[actualIdx] = {
+                ...next[actualIdx],
                 content: turn.assistantText,
-                pendingAction: turn.pendingAction,
-              },
-            ]
-          : []),
-      ]);
+              };
+            }
+          } else {
+            // No action was proposed, just a normal assistant spoken answer
+            next.push({
+              role: "assistant" as const,
+              content: turn.assistantText,
+            });
+          }
+        }
+
+        liveActionProposedInTurnRef.current = false;
+        return next;
+      });
       loadConversations();
     },
     onStockAdjustmentProposed: (action) => {
+      liveActionProposedInTurnRef.current = true;
       let promptText = `Maine **${action.productName}** ke liye details taiyaar ki hain. Kripya niche confirm karein:`;
       if (action.actionType === "delete_product") {
         promptText = `⚠️ **${action.productName}** ko delete karne ke liye confirmation chahiye. Niche review karein:`;
       } else if (action.actionType === "record_sale") {
-        promptText = `**${action.productName}** ka sale record karne aur stock deduct karne ke liye details taiyaar hain:`;
+        promptText =
+          action.items && action.items.length > 1
+            ? `**${action.items.length} items** ka sales slip record karne ke liye details screen par taiyaar hain:`
+            : `**${action.productName}** ka sale record karne ke liye details screen par taiyaar hain:`;
       } else if (action.actionType === "record_order_arrival") {
         promptText = `**${action.productName}** ka stock delivery arrival record karne ke liye details taiyaar hain:`;
       }
@@ -351,6 +398,7 @@ export function AssistantChatDrawer({
           taskType: res.message.taskType,
           structuredData: res.message.structuredData,
           pendingAction: res.message.pendingAction,
+          pendingActions: res.message.pendingActions || null,
         },
       ]);
 
@@ -705,25 +753,68 @@ export function AssistantChatDrawer({
                       />
 
                       {/* Inline confirmation card for actions */}
-                      {msg.pendingAction && shop && (
-                        <AssistantConfirmationCard
-                          shopId={shop.id}
-                          action={msg.pendingAction}
-                          onSuccess={(confirmMsg) => {
-                            setActiveMessages((prev) =>
-                              prev.map((m, i) =>
-                                i === index ? { ...m, pendingAction: null, content: confirmMsg } : m
-                              )
-                            );
-                            loadConversations();
-                          }}
-                          onCancel={() => {
-                            setActiveMessages((prev) =>
-                              prev.map((m, i) => (i === index ? { ...m, pendingAction: null } : m))
-                            );
-                            toast("Action cancelled");
-                          }}
-                        />
+                      {shop && (
+                        <>
+                          {msg.pendingActions && msg.pendingActions.length > 0 ? (
+                            <div className="space-y-3">
+                              {msg.pendingActions.map((act, actIdx) => (
+                                <AssistantConfirmationCard
+                                  key={actIdx}
+                                  shopId={shop.id}
+                                  action={act}
+                                  onSuccess={(confirmMsg) => {
+                                    setActiveMessages((prev) =>
+                                      prev.map((m, i) => {
+                                        if (i !== index) return m;
+                                        const remaining = (m.pendingActions || []).filter((_, idx) => idx !== actIdx);
+                                        return {
+                                          ...m,
+                                          pendingActions: remaining.length > 0 ? remaining : null,
+                                          pendingAction: remaining[0] || null,
+                                          content: `${m.content}\n\n${confirmMsg}`,
+                                        };
+                                      })
+                                    );
+                                    loadConversations();
+                                  }}
+                                  onCancel={() => {
+                                    setActiveMessages((prev) =>
+                                      prev.map((m, i) => {
+                                        if (i !== index) return m;
+                                        const remaining = (m.pendingActions || []).filter((_, idx) => idx !== actIdx);
+                                        return {
+                                          ...m,
+                                          pendingActions: remaining.length > 0 ? remaining : null,
+                                          pendingAction: remaining[0] || null,
+                                        };
+                                      })
+                                    );
+                                    toast("Action cancelled");
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          ) : msg.pendingAction ? (
+                            <AssistantConfirmationCard
+                              shopId={shop.id}
+                              action={msg.pendingAction}
+                              onSuccess={(confirmMsg) => {
+                                setActiveMessages((prev) =>
+                                  prev.map((m, i) =>
+                                    i === index ? { ...m, pendingAction: null, content: confirmMsg } : m
+                                  )
+                                );
+                                loadConversations();
+                              }}
+                              onCancel={() => {
+                                setActiveMessages((prev) =>
+                                  prev.map((m, i) => (i === index ? { ...m, pendingAction: null } : m))
+                                );
+                                toast("Action cancelled");
+                              }}
+                            />
+                          ) : null}
+                        </>
                       )}
                     </div>
                   ))}

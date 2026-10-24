@@ -9,6 +9,7 @@ import { KoroFace } from "@/components/brand/koro-face";
 import { useDashboardNav } from "@/lib/hooks/use-dashboard-nav";
 import { useAssistantStore } from "@/lib/store/use-assistant-store";
 import { computeGentleReminders } from "@/lib/utils/home-reminders";
+import { calculateSalesAnalytics } from "@/lib/utils/sales-analytics";
 import { Button } from "@/components/ui/button";
 import {
   PlusCircle,
@@ -160,6 +161,10 @@ export function HomeView({
     });
   }, [products, restockOrders, stockMovements, salesSlips, shop?.category]);
 
+  const salesAnalytics = useMemo(() => {
+    return calculateSalesAnalytics(salesSlips, "today");
+  }, [salesSlips]);
+
   const hero = (
     <HomeHero
       firstName={firstName}
@@ -171,6 +176,9 @@ export function HomeView({
       isDictating={isHomeDictating}
       onOpenChat={() => openDrawer()}
       chips={quickChips}
+      todayEarnings={salesAnalytics.todayRevenue}
+      todaySlipsCount={salesAnalytics.todaySlipsCount}
+      onViewSales={() => setActiveTab("sales")}
     />
   );
 

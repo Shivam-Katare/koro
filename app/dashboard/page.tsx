@@ -104,7 +104,7 @@ export default async function DashboardPage() {
       .select("*")
       .eq("shop_id", activeShop.id)
       .order("created_at", { ascending: false })
-      .limit(15),
+      .limit(150),
   ]);
 
   const products = (productsRes.data as unknown as Product[]) ?? [];

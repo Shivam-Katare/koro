@@ -14,6 +14,7 @@ import {
   executeProposeUpdatePrice,
   executeProposeDeleteProduct,
   executeProposeRecordSale,
+  executeUpdateSlipNote,
   executeGetSalesHistory,
   executeGetRestockOrdersSummary,
   executeProposeRecordArrival,
@@ -37,7 +38,7 @@ Core Speaking Rules:
    - To check quantity or stock status: ALWAYS call check_product_stock.
    - To find low or out of stock items: ALWAYS call get_low_stock_products.
    - To check price or past rates: ALWAYS call get_product_price_history.
-   - To add, deduct, or adjust stock: ALWAYS call propose_stock_adjustment. Never update stock silently.
+   - To manually add or adjust non-sale stock: ALWAYS call propose_stock_adjustment. (For sales, ALWAYS use propose_record_sale, NEVER propose_stock_adjustment).
 4. Total Products vs Stock Units (CRITICAL RULE):
    - When asked "how many products do I have in my total shop" / "total products kitne hain" / "shop mein kitna samaan hai":
      ALWAYS call get_store_inventory_summary.
@@ -57,26 +58,44 @@ Core Speaking Rules:
    - NEVER call propose_create_product when the shopkeeper is simply telling where an item is stored or what price it has!
    - When calling propose_create_product, say politely: "[productName] add karne ke liye details taiyaar hain. Ek baar check kar lijiye."
 8. Recording Counter Sales & Slips:
-   - When the user says they sold items (e.g. "Today I sold 5 Lakme items", "Sold 5 Lakme at 50", "5 Lakme beche", "Maine abhi-abhi Bahubali ki lal chudi bechi hai. Use sale me add kar"):
-     ALWAYS call propose_record_sale.
-     CRITICAL FOR UNLINKED / CUSTOM ITEMS:
-     If the item is not found in the inventory catalog, DO NOT REFUSE IT! The store explicitly supports unlinked / custom items. propose_record_sale will generate an unlinked sales slip confirmation card immediately without deducting stock.
-     Say: "[Product] ka sale slip screen par create kar diya hai. Check karke confirm kar dijiye."
-9. Sales History & Earnings Lookup:
-   - When the user asks how much money they earned, how much sales happened on a date, or asks for recent slips (e.g. "On 20th January 2026 how much did I earn", "today's sales", "aaj kitni kamai hui"):
-     ALWAYS call query_sales_history.
-     Answer directly with total earnings, bill count, and units sold.
-10. Restock Orders, Status & Queries:
+   - MULTI-ITEM SALES IN ONE GO (DEFAULT):
+     When the user mentions multiple items sold together in one go (e.g. "Today I sold 4 Nivea creams, 3 Lakme Kajals, and 2 chudis", or "2 Nivea creams, 1 Lakme of ₹50, and ₹20 one"):
+     ALWAYS put ALL items into a SINGLE propose_record_sale call using the 'items' array. This creates ONE single sales slip for the user to confirm.
+   - NO DUPLICATE SLIPS (CRITICAL):
+     Make EXACTLY ONE call to propose_record_sale. NEVER call propose_record_sale more than once per turn unless explicitly asked to split slips!
+     DO NOT call propose_record_sale for individual items if you already put them in the 'items' array!
+     DO NOT call propose_stock_adjustment alongside propose_record_sale! Sales slips automatically deduct inventory stock upon shopkeeper confirmation.
+   - EXPLICIT SLIP SPLITTING:
+     ONLY create multiple separate slips if the user explicitly instructs you to split them (e.g. "make 2 slips: in 1 slip put Lakme and Nivea cream and the second slip will contain the chudi"). In that case, call propose_record_sale once for each slip.
+   - OUT-OF-STOCK AWARENESS:
+     If a product has 0 stock in the shop system (e.g. serum is out of stock), be self-aware and verbally inform the shopkeeper:
+     "Ye item system mein out of stock hai (stock 0 hai). Kya aapne dukaan mein naya mangwaya tha? Maine sales slip screen par create kar di hai, aap check karke confirm kar sakte hain."
+     Still generate the slip confirmation card so they can confirm the sale.
+   - UNLINKED / CUSTOM ITEMS:
+     If an item is not found in the inventory catalog (e.g. custom bangles, loose goods), DO NOT REFUSE IT! The store supports unlinked items. propose_record_sale will create an unlinked item sales slip confirmation card immediately without deducting stock.
+   - Spoken Response:
+     "[Product/Items] ka sales slip screen par create kar diya hai. Check karke confirm kar dijiye."
+9. Sales History, Earnings & "How Much Money Did I Sell":
+   - When the user asks "How much money did I sell?", "How much did I earn?", "Total sale kitni hui?", "Aaj kitna bika?", or asks about sales without specifying a date:
+     ALWAYS default 'dateQuery' to "today". Call query_sales_history with dateQuery: "today".
+   - If they specify yesterday, this week, this month, or a specific date (e.g. "20th January 2026"):
+     Pass that dateQuery into query_sales_history.
+   - Answer directly with exact total revenue in ₹, slip count, and units sold.
+10. Updating Slip Notes & Udhar:
+    - When the user asks to add or update notes or udhar on a slip (e.g. "For the recent slip that you created for chudi, add a note as well, like it's a udhar of ₹50", "Slip number 4567834 mein note update kar do", "Is slip mein note daal do udhar ₹50"):
+      ALWAYS call update_slip_note with 'note', 'slipNumber' (if provided), and/or 'itemHint' (if item name mentioned, like "chudi").
+      Confirm: "Slip par note update ho gaya hai: [note]."
+11. Restock Orders, Status & Queries:
     - When user asks about cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order:
       ALWAYS call query_restock_orders.
       Give direct, short answers.
-11. Restock Arrival:
+12. Restock Arrival:
     - When user says order or delivery arrived (e.g. "Lakme restock aa gaya", "Order PO-123 arrived"):
       ALWAYS call propose_record_order_arrival.
-12. Deleting Products:
+13. Deleting Products:
     - When user asks to delete an item (e.g. "Delete product Lakme", "Lakme delete kar do"):
       ALWAYS call propose_delete_product. Never delete silently.
-13. Ambiguity Resolution:
+14. Ambiguity Resolution:
     - If multiple matching products are found, the tools return distinct options. Ask the shopkeeper politely which specific product they meant before proceeding.`;
 
 const LIVE_TOOLS = [
@@ -248,17 +267,39 @@ const LIVE_TOOLS = [
       },
       {
         name: "propose_record_sale",
-        description: "Propose recording a counter sale of products (e.g. 'Today I sold 5 Lakme items at 50', 'Maine Bahubali ki lal chudi bechi hai'). Also supports unlinked/custom items that are not yet in the inventory catalog (e.g. bangles, custom goods, loose items) without refusing.",
+        description: "Propose recording a counter sale of products (e.g. 'Today I sold 4 Nivea creams, 3 Lakme Kajals, and 2 chudis', '2 Nivea creams and 1 Lakme of Rs 50'). Supports multi-item sales in one slip, out-of-stock items, and unlinked/custom goods without refusing.",
         parameters: {
           type: "OBJECT",
           properties: {
+            items: {
+              type: "ARRAY",
+              description: "Array of line items when multiple products are sold together on one bill/slip",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  productName: {
+                    type: "STRING",
+                    description: "Name of the product",
+                  },
+                  quantity: {
+                    type: "INTEGER",
+                    description: "Number of units sold",
+                  },
+                  unitPrice: {
+                    type: "NUMBER",
+                    description: "Price per unit in rupees if mentioned",
+                  },
+                },
+                required: ["productName", "quantity"],
+              },
+            },
             productName: {
               type: "STRING",
-              description: "Product sold",
+              description: "Product sold (for single item sale)",
             },
             quantity: {
               type: "INTEGER",
-              description: "Number of units sold",
+              description: "Number of units sold (for single item sale)",
             },
             unitPrice: {
               type: "NUMBER",
@@ -266,10 +307,31 @@ const LIVE_TOOLS = [
             },
             notes: {
               type: "STRING",
-              description: "Optional notes",
+              description: "Optional customer note or udhar details for this slip",
             },
           },
-          required: ["productName", "quantity"],
+        },
+      },
+      {
+        name: "update_slip_note",
+        description: "Add or update customer notes or udhar details on an existing sales slip (e.g. 'for the recent slip add note udhar of Rs 50', 'slip number 4567834 note update karo udhar 50').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            note: {
+              type: "STRING",
+              description: "The note or udhar text to add/update on the slip (e.g. 'udhar of ₹50')",
+            },
+            slipNumber: {
+              type: "STRING",
+              description: "Optional specific slip number if mentioned (e.g. 'SLIP-260120-1234' or '4567834')",
+            },
+            itemHint: {
+              type: "STRING",
+              description: "Optional product or item name mentioned in the slip (e.g. 'chudi', 'Nivea')",
+            },
+          },
+          required: ["note"],
         },
       },
       {
@@ -461,16 +523,23 @@ export async function executeLiveToolCallAction(input: {
       );
     } else if (toolName === "propose_record_sale") {
       toolResult = await executeProposeRecordSale(supabase, shopId, {
-        productName: args.productName || "",
-        quantity: Number(args.quantity) || 1,
+        items: args.items,
+        productName: args.productName || (!args.items ? "" : undefined),
+        quantity: args.quantity ? Number(args.quantity) : undefined,
         unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
         notes: args.notes,
+      });
+    } else if (toolName === "update_slip_note") {
+      toolResult = await executeUpdateSlipNote(supabase, shopId, {
+        note: args.note,
+        slipNumber: args.slipNumber,
+        itemHint: args.itemHint,
       });
     } else if (toolName === "query_sales_history") {
       toolResult = await executeGetSalesHistory(
         supabase,
         shopId,
-        args.dateQuery || ""
+        args.dateQuery || "today"
       );
     } else if (toolName === "query_restock_orders") {
       toolResult = await executeGetRestockOrdersSummary(

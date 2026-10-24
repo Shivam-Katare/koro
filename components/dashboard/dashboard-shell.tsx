@@ -85,7 +85,7 @@ export function DashboardShell({
             )}
 
             {activeTab === "sales" && (
-              <SalesView shop={shop} products={products} />
+              <SalesView shop={shop} products={products} initialSlips={salesSlips} />
             )}
 
             {activeTab === "restock" && (

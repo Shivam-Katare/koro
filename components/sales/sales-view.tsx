@@ -1,6 +1,6 @@
 "use client";
 
-import type { Shop, Product } from "@/lib/supabase/types";
+import type { Shop, Product, SalesSlip } from "@/lib/supabase/types";
 import { useSalesStore } from "@/lib/store/use-sales-store";
 import { SalesStats } from "./sales-stats";
 import { SalesQuickCatalog } from "./sales-quick-catalog";
@@ -12,9 +12,10 @@ import { cn } from "@/lib/utils";
 interface SalesViewProps {
   shop: Shop | null;
   products: Product[];
+  initialSlips?: SalesSlip[];
 }
 
-export function SalesView({ shop, products }: SalesViewProps) {
+export function SalesView({ shop, products, initialSlips = [] }: SalesViewProps) {
   const activeSubView = useSalesStore((s) => s.activeSubView);
   const setActiveSubView = useSalesStore((s) => s.setActiveSubView);
   const lines = useSalesStore((s) => s.lines);
@@ -70,7 +71,7 @@ export function SalesView({ shop, products }: SalesViewProps) {
       </div>
 
       {/* KPI Stats Bar */}
-      <SalesStats products={products} />
+      <SalesStats products={products} initialSlips={initialSlips} />
 
       {/* Main Content Area */}
       {activeSubView === "counter" ? (
@@ -102,7 +103,7 @@ export function SalesView({ shop, products }: SalesViewProps) {
           <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
             Past sales slips
           </h2>
-          <SalesHistoryView shop={shop} />
+          <SalesHistoryView shop={shop} initialSlips={initialSlips} />
         </div>
       )}
     </div>

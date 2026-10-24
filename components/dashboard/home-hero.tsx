@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ArrowUp, Mic, MessageSquare } from "lucide-react";
+import { ArrowUp, Mic, MessageSquare, TrendingUp } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { KoroFace } from "@/components/brand/koro-face";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,9 @@ interface HomeHeroProps {
   isDictating: boolean;
   onOpenChat: () => void;
   chips: HomeHeroChip[];
+  todayEarnings?: number;
+  todaySlipsCount?: number;
+  onViewSales?: () => void;
 }
 
 function getGreeting(hour: number) {
@@ -40,6 +43,9 @@ export function HomeHero({
   isDictating,
   onOpenChat,
   chips,
+  todayEarnings = 0,
+  todaySlipsCount = 0,
+  onViewSales,
 }: HomeHeroProps) {
   // Computed after mount so server and client markup never disagree on the hour.
   const [greeting, setGreeting] = useState("Hello");
@@ -96,9 +102,30 @@ export function HomeHero({
 
       {/* Written question: ChatGPT / Claude style box */}
       <div className="mx-auto mt-10 max-w-3xl">
-        <p className="mb-3 text-center text-base font-medium text-muted-foreground">
-          Or write your question
-        </p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+          <p className="text-base font-medium text-muted-foreground">
+            Or write your question
+          </p>
+
+          {/* Today's Sales KPI Pill */}
+          <button
+            type="button"
+            onClick={onViewSales}
+            title="Click to view Sales & Slips"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-1 text-sm font-semibold text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-400 shadow-2xs"
+          >
+            <TrendingUp className="h-4 w-4" />
+            <span>Today&apos;s sales:</span>
+            <span className="font-heading font-extrabold text-foreground tabular-nums">
+              ₹{todayEarnings.toFixed(0)}
+            </span>
+            {todaySlipsCount > 0 && (
+              <span className="text-xs font-normal text-muted-foreground">
+                ({todaySlipsCount} slip{todaySlipsCount > 1 ? "s" : ""})
+              </span>
+            )}
+          </button>
+        </div>
         <div className="rounded-3xl border border-input bg-card p-3 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
           <textarea
             value={query}

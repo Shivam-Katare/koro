@@ -85,16 +85,66 @@ export function AssistantConfirmationCard({
       : ""
   );
 
-  // Editable fields for record_sale
-  const [saleQuantity, setSaleQuantity] = useState<number>(
-    action.quantity && action.quantity > 0 ? action.quantity : 1
-  );
-  const [saleUnitPrice, setSaleUnitPrice] = useState<string>(
-    action.unitPrice !== undefined && action.unitPrice !== null
-      ? String(action.unitPrice)
-      : action.sellingPrice !== undefined && action.sellingPrice !== null
-      ? String(action.sellingPrice)
-      : "0"
+  // Editable fields for record_sale (supports multi-line sales slips, notes, out-of-stock)
+  const [saleLines, setSaleLines] = useState<
+    Array<{
+      productId?: string;
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal?: number;
+      currentStock?: number | null;
+      newStock?: number | null;
+      isUnlinked?: boolean;
+      isOutOfStock?: boolean;
+    }>
+  >(() => {
+    if (action.items && action.items.length > 0) {
+      return action.items.map((it) => {
+        const q = it.quantity && it.quantity > 0 ? it.quantity : 1;
+        const p = it.unitPrice !== undefined ? it.unitPrice : 0;
+        return {
+          productId: it.productId,
+          productName: it.productName,
+          quantity: q,
+          unitPrice: p,
+          lineTotal: q * p,
+          currentStock: it.currentStock,
+          newStock: it.newStock,
+          isUnlinked: it.isUnlinked,
+          isOutOfStock:
+            it.isOutOfStock ||
+            (it.currentStock !== undefined && it.currentStock !== null && it.currentStock <= 0),
+        };
+      });
+    }
+    const q = action.quantity && action.quantity > 0 ? action.quantity : 1;
+    const p =
+      action.unitPrice !== undefined && action.unitPrice !== null
+        ? action.unitPrice
+        : action.sellingPrice !== undefined && action.sellingPrice !== null
+        ? action.sellingPrice
+        : 0;
+    return [
+      {
+        productId: action.productId,
+        productName: action.productName,
+        quantity: q,
+        unitPrice: p,
+        lineTotal: q * p,
+        currentStock: action.currentStock,
+        newStock: action.newStock,
+        isUnlinked: Boolean(action.isUnlinked || !action.productId),
+        isOutOfStock: Boolean(
+          action.hasOutOfStock ||
+            (action.currentStock !== undefined && action.currentStock !== null && action.currentStock <= 0)
+        ),
+      },
+    ];
+  });
+
+  const [customerNote, setCustomerNote] = useState<string>(
+    action.notes || ""
   );
 
   // Editable fields for record_order_arrival
@@ -155,20 +205,33 @@ export function AssistantConfirmationCard({
 
   // 1c. Handle Sale Confirmation (creates sales slip & deducts stock)
   const handleConfirmSale = async () => {
-    const qty = Math.max(1, saleQuantity);
-    const price = Math.max(0, parseFloat(saleUnitPrice) || 0);
+    const validLines = saleLines.map((line) => {
+      const q = Math.max(1, Number(line.quantity) || 1);
+      const p = Math.max(0, Number(line.unitPrice) || 0);
+      return {
+        ...line,
+        quantity: q,
+        unitPrice: p,
+        lineTotal: q * p,
+      };
+    });
+
+    const totalBill = validLines.reduce((acc, it) => acc + (it.lineTotal || 0), 0);
+    const anyUnlinked = validLines.some((it) => it.isUnlinked);
 
     setIsSubmitting(true);
     const res = await confirmAssistantActionExecution({
       shopId,
       actionType: "record_sale",
-      productId: action.productId,
-      productName: action.productName,
-      quantity: qty,
-      unitPrice: price,
-      totalAmount: qty * price,
-      reason: action.reason || (action.isUnlinked ? "unlinked_counter_sale" : "counter_sale"),
-      isUnlinked: action.isUnlinked,
+      productId: validLines.length === 1 ? validLines[0].productId : undefined,
+      productName: validLines.length === 1 ? validLines[0].productName : `${validLines.length} Items Slip`,
+      quantity: validLines.length === 1 ? validLines[0].quantity : undefined,
+      unitPrice: validLines.length === 1 ? validLines[0].unitPrice : undefined,
+      totalAmount: totalBill,
+      items: validLines,
+      notes: customerNote.trim() || undefined,
+      reason: customerNote.trim() || action.reason || (anyUnlinked ? "unlinked_counter_sale" : "counter_sale"),
+      isUnlinked: anyUnlinked,
     });
     setIsSubmitting(false);
 
@@ -178,9 +241,12 @@ export function AssistantConfirmationCard({
     }
 
     setIsDone(true);
-    const totalMsg = `Recorded sale: ${qty}x ${action.productName} (Total ₹${qty * price}).`;
+    const totalMsg =
+      validLines.length > 1
+        ? `Recorded sales slip: ${validLines.length} items (Total ₹${totalBill}).`
+        : `Recorded sale: ${validLines[0].quantity}x ${validLines[0].productName} (Total ₹${totalBill}).`;
     setDoneMessage(totalMsg);
-    toast.success(`Sale recorded for ${action.productName}!`);
+    toast.success(res.message || totalMsg);
     onSuccess(res.message || totalMsg);
   };
 
@@ -695,100 +761,184 @@ export function AssistantConfirmationCard({
   }
 
   // --------------------------------------------------------------------------
-  // RECORD SALE CARD
+  // RECORD SALE CARD (Supports Multi-Item Slips, Out-of-Stock Awareness, Udhar / Notes)
   // --------------------------------------------------------------------------
   if (action.actionType === "record_sale") {
-    const qty = Math.max(1, saleQuantity);
-    const unitPriceNum = Math.max(0, parseFloat(saleUnitPrice) || 0);
-    const totalCalc = qty * unitPriceNum;
-    const isUnlinked = Boolean(action.isUnlinked || !action.productId);
-    const currentStock = action.currentStock ?? 0;
-    const newStockCalc = Math.max(0, currentStock - qty);
+    const totalCalc = saleLines.reduce((acc, it) => acc + (it.quantity * it.unitPrice), 0);
+    const anyUnlinked = saleLines.some((it) => it.isUnlinked);
+    const anyOutOfStock = saleLines.some((it) => it.isOutOfStock);
+    const isMultiItem = saleLines.length > 1;
+
+    const updateLineItem = (index: number, patch: Partial<(typeof saleLines)[0]>) => {
+      setSaleLines((prev) =>
+        prev.map((item, idx) => {
+          if (idx !== index) return item;
+          const updated = { ...item, ...patch };
+          updated.lineTotal = (updated.quantity || 1) * (updated.unitPrice || 0);
+          return updated;
+        })
+      );
+    };
 
     return (
       <div className="p-3.5 sm:p-4 rounded-xl border border-emerald-500/40 bg-card/95 shadow-md space-y-3 animate-fadeIn">
+        {/* Header */}
         <div className="flex items-center justify-between pb-2 border-b border-border/50">
           <div className="flex items-center gap-2 text-xs font-bold text-foreground">
             <div className="h-6 w-6 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
               <Receipt className="h-3.5 w-3.5" />
             </div>
-            <span>{isUnlinked ? "Record Custom / Unlinked Sale" : "Record Sale & Deduct Stock"}</span>
+            <span>
+              {isMultiItem
+                ? `Sales Slip (${saleLines.length} Items)`
+                : anyUnlinked
+                ? "Record Custom / Unlinked Sale"
+                : "Record Sale & Deduct Stock"}
+            </span>
           </div>
           <Badge
             variant="outline"
             className={
-              isUnlinked
+              anyUnlinked
                 ? "border-amber-500/30 text-amber-700 dark:text-amber-400 bg-amber-500/10 text-[10px] py-0 px-1.5 font-semibold"
                 : "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5 text-[10px] py-0 px-1.5 font-semibold"
             }
           >
-            {isUnlinked ? "Unlinked Item" : "Sales Slip"}
+            {isMultiItem ? "Multi-Item Bill" : anyUnlinked ? "Unlinked Item" : "Sales Slip"}
           </Badge>
         </div>
 
+        {/* Out of Stock Alert Banner */}
+        {anyOutOfStock && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="font-semibold text-xs">⚠️ Item(s) Out of Stock (Stock 0 in system)</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-tight">
+                Dukaan mein physical stock aaya tha to aap yeh sale bina kisi rukawat ke record kar sakte hain. System stock 0 se deduct nahi hoga.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Line Items List */}
         <div className="space-y-2 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-bold text-foreground text-sm truncate">{action.productName}</p>
-            {isUnlinked && (
-              <span className="shrink-0 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                ↔ Uncataloged
-              </span>
-            )}
+          {saleLines.map((line, idx) => {
+            const lineCurrentStock = line.currentStock ?? 0;
+            const lineNewStock = Math.max(0, lineCurrentStock - line.quantity);
+            return (
+              <div
+                key={idx}
+                className="p-2.5 rounded-lg border border-border/60 bg-muted/30 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-foreground text-xs truncate">
+                    {line.productName}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {line.isOutOfStock && (
+                      <span className="text-[10px] font-semibold text-rose-700 dark:text-rose-300 bg-rose-500/15 px-1.5 py-0.5 rounded border border-rose-500/30">
+                        ⚠️ Out of Stock
+                      </span>
+                    )}
+                    {line.isUnlinked && (
+                      <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                        ↔ Uncataloged
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Qty (Piece)</label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={line.quantity}
+                      onChange={(e) =>
+                        updateLineItem(idx, {
+                          quantity: Math.max(1, parseInt(e.target.value, 10) || 1),
+                        })
+                      }
+                      disabled={isSubmitting}
+                      className="h-7 text-xs bg-background"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-0.5">
+                      <IndianRupee className="h-2.5 w-2.5" />
+                      <span>Price / Unit</span>
+                    </label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={line.unitPrice}
+                      onChange={(e) =>
+                        updateLineItem(idx, {
+                          unitPrice: Math.max(0, parseFloat(e.target.value) || 0),
+                        })
+                      }
+                      disabled={isSubmitting}
+                      className="h-7 text-xs bg-background"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/40">
+                  <span>
+                    {line.isUnlinked ? (
+                      <span className="text-amber-600 dark:text-amber-400 font-medium">No catalog deduction</span>
+                    ) : line.isOutOfStock ? (
+                      <span className="text-rose-600 dark:text-rose-400 font-medium">Stock: 0</span>
+                    ) : (
+                      <span>
+                        Stock: <strong>{lineCurrentStock}</strong> ➔ <strong className="text-foreground">{lineNewStock}</strong>
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-semibold text-foreground">
+                    Subtotal: ₹{((line.quantity || 1) * (line.unitPrice || 0)).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Slip Note / Udhar Input */}
+          <div className="space-y-1 pt-1">
+            <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+              <span>📝 Note / Udhar / Customer info (optional):</span>
+            </label>
+            <Input
+              type="text"
+              placeholder="e.g. Ramesh Bhai udhar ₹50 / Paid via GPay"
+              value={customerNote}
+              onChange={(e) => setCustomerNote(e.target.value)}
+              disabled={isSubmitting}
+              className="h-8 text-xs bg-background"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-muted-foreground">Units Sold</label>
-              <Input
-                type="number"
-                min="1"
-                value={saleQuantity}
-                onChange={(e) => setSaleQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                disabled={isSubmitting}
-                className="h-8 text-xs bg-background"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-0.5">
-                <IndianRupee className="h-3 w-3" />
-                <span>Price / Unit</span>
-              </label>
-              <Input
-                type="number"
-                min="0"
-                step="0.5"
-                value={saleUnitPrice}
-                onChange={(e) => setSaleUnitPrice(e.target.value)}
-                placeholder="0"
-                disabled={isSubmitting}
-                className="h-8 text-xs bg-background"
-              />
-            </div>
-          </div>
-
-          <div className="p-2.5 rounded-lg bg-muted/50 border border-border/50 space-y-1 text-xs">
+          {/* Total Bill Box */}
+          <div className="p-2.5 rounded-lg bg-emerald-500/10 dark:bg-emerald-950/20 border border-emerald-500/30 space-y-1 text-xs">
             <div className="flex items-center justify-between font-semibold">
-              <span className="text-muted-foreground">Total Bill:</span>
-              <span className="text-foreground text-sm font-bold text-emerald-600 dark:text-emerald-400">
+              <span className="text-foreground font-bold">Total Bill Amount:</span>
+              <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
                 ₹{totalCalc.toLocaleString("en-IN")}
               </span>
             </div>
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
-              <span>{isUnlinked ? "Catalog Status:" : "Inventory Stock:"}</span>
-              {isUnlinked ? (
-                <span className="text-amber-600 dark:text-amber-400 font-medium">
-                  ↔ Unlinked (No stock deduction)
-                </span>
-              ) : (
-                <span>
-                  <strong>{currentStock}</strong> ➔ <strong className="text-foreground">{newStockCalc} units</strong>
-                </span>
-              )}
-            </div>
+            {customerNote.trim() && (
+              <p className="text-[11px] text-muted-foreground truncate">
+                📝 Note: <span className="text-foreground font-medium">{customerNote.trim()}</span>
+              </p>
+            )}
           </div>
         </div>
 
+        {/* Buttons */}
         <div className="flex items-center gap-2 pt-1 border-t border-border/50">
           <Button
             type="button"
@@ -800,12 +950,12 @@ export function AssistantConfirmationCard({
             {isSubmitting ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Generating Slip...</span>
+                <span>Recording Slip...</span>
               </>
             ) : (
               <>
                 <Receipt className="h-3.5 w-3.5" />
-                <span>{isUnlinked ? "Confirm Sale (बिक्री दर्ज करें)" : "Confirm & Deduct Stock"}</span>
+                <span>Confirm &amp; Record Slip (बिक्री दर्ज करें)</span>
               </>
             )}
           </Button>
