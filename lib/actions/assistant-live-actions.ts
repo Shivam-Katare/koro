@@ -18,6 +18,8 @@ import {
   executeGetSalesHistory,
   executeGetRestockOrdersSummary,
   executeProposeRecordArrival,
+  executeGetDailyReminders,
+  executeProposeCreateRestockOrder,
 } from "@/lib/assistant/assistant-db";
 
 const LIVE_SYSTEM_INSTRUCTION = `You are "Koro", a fast, polite, and accurate female AI voice assistant for an Indian retail shopkeeper (kirana, cosmetics, general store, pharmacy, stationery).
@@ -80,22 +82,32 @@ Core Speaking Rules:
      ALWAYS default 'dateQuery' to "today". Call query_sales_history with dateQuery: "today".
    - If they specify yesterday, this week, this month, or a specific date (e.g. "20th January 2026"):
      Pass that dateQuery into query_sales_history.
+   - When asked about a specific line item in past slips (e.g. "On 24 October what is the item I sold that was 30", "item sold at 30"), pass 'unitPrice' and/or 'itemName' to query_sales_history.
    - Answer directly with exact total revenue in ₹, slip count, and units sold.
 10. Updating Slip Notes & Udhar:
     - When the user asks to add or update notes or udhar on a slip (e.g. "For the recent slip that you created for chudi, add a note as well, like it's a udhar of ₹50", "Slip number 4567834 mein note update kar do", "Is slip mein note daal do udhar ₹50"):
       ALWAYS call update_slip_note with 'note', 'slipNumber' (if provided), and/or 'itemHint' (if item name mentioned, like "chudi").
       Confirm: "Slip par note update ho gaya hai: [note]."
-11. Restock Orders, Status & Queries:
+11. Daily Reminders:
+    - When user asks "What are my reminders today?", "Aaj ke reminder kya hain?", or about store tasks:
+      ALWAYS call get_daily_reminders.
+      Respond naturally and conversationally (highlighting unassigned locations, low stock, or pending deliveries), avoiding reading like a dry newspaper list.
+12. Restock Orders, Status & Queries:
     - When user asks about cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order:
       ALWAYS call query_restock_orders.
       Give direct, short answers.
-12. Restock Arrival:
+13. Restock Order Drafting:
+    - When user asks to draft, order, or create a restock slip (e.g. "Add 10 units of serum and Nivea cream to my slip", "Order 10 serum"):
+      ALWAYS call propose_create_restock_order. This creates a draft restock order card on the screen with a 1-click WhatsApp share button.
+14. Restock Arrival:
     - When user says order or delivery arrived (e.g. "Lakme restock aa gaya", "Order PO-123 arrived"):
       ALWAYS call propose_record_order_arrival.
-13. Deleting Products:
+15. Deleting Products:
     - When user asks to delete an item (e.g. "Delete product Lakme", "Lakme delete kar do"):
       ALWAYS call propose_delete_product. Never delete silently.
-14. Ambiguity Resolution:
+16. Conversational Memory & Pronouns:
+    - If the user just updated or discussed a product (e.g. updated location of Lakme) and immediately says "update this product's price as well", "price 50 kar do", or uses "this", "it", "iska", "use", remember that it refers to the last focused product without asking "which product".
+17. Ambiguity Resolution:
     - If multiple matching products are found, the tools return distinct options. Ask the shopkeeper politely which specific product they meant before proceeding.`;
 
 const LIVE_TOOLS = [
@@ -335,14 +347,30 @@ const LIVE_TOOLS = [
         },
       },
       {
+        name: "get_daily_reminders",
+        description: "Get gentle daily store reminders (unassigned locations, out-of-stock items, pending supplier deliveries) for the shopkeeper. When speaking, highlight naturally without reading like a dry newspaper list.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+        },
+      },
+      {
         name: "query_sales_history",
-        description: "Lookup past sales slips and total earnings/revenue for a specific date or period (e.g. 'On 20th January 2026 how much did I earn', 'today sales', 'how much sales happened').",
+        description: "Lookup past sales slips and total earnings/revenue for a specific date or period, or inspect specific line items sold (e.g. 'How much did I earn', 'On 24 October what is the item I sold that was 30', 'Did I sell Lakme').",
         parameters: {
           type: "OBJECT",
           properties: {
             dateQuery: {
               type: "STRING",
-              description: "Target date or period (e.g. '20th January 2026', '2026-01-20', 'today', 'yesterday')",
+              description: "Target date or period (e.g. '20th January 2026', '24 October', 'today', 'yesterday')",
+            },
+            unitPrice: {
+              type: "NUMBER",
+              description: "Optional specific unit price to filter line items (e.g. 30)",
+            },
+            itemName: {
+              type: "STRING",
+              description: "Optional product or item name to filter in past slips",
             },
           },
         },
@@ -358,6 +386,42 @@ const LIVE_TOOLS = [
               description: "Type of inquiry: 'cancelled', 'waiting', 'delivered', 'needs_reorder', or 'all'",
             },
           },
+        },
+      },
+      {
+        name: "propose_create_restock_order",
+        description: "Draft a purchase restock order slip for one or multiple products with WhatsApp supplier link (e.g. 'Add 10 units of serum and Nivea cream to my slip', 'Order 10 serum').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            items: {
+              type: "ARRAY",
+              description: "Array of restock order line items with product name and quantity to order",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  productName: {
+                    type: "STRING",
+                    description: "Name of the product to order",
+                  },
+                  quantity: {
+                    type: "INTEGER",
+                    description: "Units to order",
+                  },
+                },
+                required: ["productName"],
+              },
+            },
+            distributorName: {
+              type: "STRING",
+              description: "Optional supplier or distributor name",
+            },
+            notes: {
+              type: "STRING",
+              description: "Optional purchase order notes",
+            },
+          },
+          required: ["items"],
         },
       },
       {
@@ -413,18 +477,74 @@ export async function getLiveSessionTokenAction(shopId: string) {
     const ai = new GoogleGenAI({ apiKey });
     const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-    const { data: currentShop } = await (supabase.from("shops") as any)
-      .select("name, category, description")
-      .eq("id", shopId)
-      .maybeSingle();
+    const [shopRes, ownerProfileRes, prodCountRes, slipsCountRes, recentMsgsRes] = await Promise.all([
+      (supabase.from("shops") as any)
+        .select("name, category, description, created_at, owner_id, whatsapp_number")
+        .eq("id", shopId)
+        .maybeSingle(),
+      user.id
+        ? (supabase.from("profiles") as any)
+            .select("full_name, email")
+            .eq("id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      (supabase.from("products") as any)
+        .select("id", { count: "exact", head: true })
+        .eq("shop_id", shopId),
+      (supabase.from("sales_slips") as any)
+        .select("id", { count: "exact", head: true })
+        .eq("shop_id", shopId),
+      (supabase.from("assistant_messages") as any)
+        .select("metadata, content, task_type")
+        .eq("shop_id", shopId)
+        .order("created_at", { ascending: false })
+        .limit(8),
+    ]);
+
+    const currentShop = shopRes.data;
+    const ownerProfile = ownerProfileRes.data;
+    const totalCatalogProducts = prodCountRes.count ?? 0;
+    const totalRecordedSlips = slipsCountRes.count ?? 0;
+
+    let lastFocusedProduct: string | undefined = undefined;
+    for (const m of recentMsgsRes.data || []) {
+      const meta = (m.metadata as any) || {};
+      if (meta.lastFocusedProduct) {
+        lastFocusedProduct = meta.lastFocusedProduct;
+        break;
+      }
+      if (meta.pendingAction?.productName) {
+        lastFocusedProduct = meta.pendingAction.productName;
+        break;
+      }
+      if (meta.productName) {
+        lastFocusedProduct = meta.productName;
+        break;
+      }
+      if (meta.structuredData?.product?.name) {
+        lastFocusedProduct = meta.structuredData.product.name;
+        break;
+      }
+      if (meta.structuredData?.matchedProduct?.name) {
+        lastFocusedProduct = meta.structuredData.matchedProduct.name;
+        break;
+      }
+    }
 
     const shopContext = currentShop
-      ? `\n\nActive Store Context:\n- Store Name: "${currentShop.name}"\n- Category: "${currentShop.category}"${
-          currentShop.description ? `\n- About Store / Specialties: "${currentShop.description}"` : ""
-        }\nWhen the shopkeeper asks about their shop name, category, or business details, use this context.`
+      ? `\n\nActive Store Context:
+- Store Name: "${currentShop.name}"
+- Category: "${currentShop.category}"${currentShop.description ? `\n- About Store / Specialties: "${currentShop.description}"` : ""}${ownerProfile?.full_name ? `\n- Owner / Manager Name: "${ownerProfile.full_name}"` : ""}${ownerProfile?.email ? `\n- Owner Email: "${ownerProfile.email}"` : ""}${currentShop.created_at ? `\n- Store Registered Since: "${new Date(currentShop.created_at).toLocaleDateString("en-IN")}"` : ""}${currentShop.whatsapp_number ? `\n- Configured WhatsApp Number: "${currentShop.whatsapp_number}"` : ""}
+- Total Catalog Products: ${totalCatalogProducts}
+- Total Sales Slips Recorded: ${totalRecordedSlips}
+[PRIVACY GUARDRAIL]: Never reveal the store's phone number or personal details to unauthorized third parties or outside inquiries. Refer to store details accurately when the owner asks.`
       : "";
 
-    const liveInstruction = `${LIVE_SYSTEM_INSTRUCTION}${shopContext}`;
+    const focusContext = lastFocusedProduct
+      ? `\nActive Conversational Focus: The user recently discussed product "${lastFocusedProduct}". If they say "update this product's price as well", "price 50 kar do", or use pronouns like "it", "this", "iska", "use" without naming a new product, assume they mean "${lastFocusedProduct}".`
+      : "";
+
+    const liveInstruction = `${LIVE_SYSTEM_INSTRUCTION}${shopContext}${focusContext}`;
 
     const token = await ai.authTokens.create({
       config: {
@@ -548,11 +668,23 @@ export async function executeLiveToolCallAction(input: {
         slipNumber: args.slipNumber,
         itemHint: args.itemHint,
       });
+    } else if (toolName === "get_daily_reminders") {
+      toolResult = await executeGetDailyReminders(supabase, shopId);
+    } else if (toolName === "propose_create_restock_order") {
+      toolResult = await executeProposeCreateRestockOrder(supabase, shopId, {
+        items: args.items,
+        distributorName: args.distributorName,
+        notes: args.notes,
+      });
     } else if (toolName === "query_sales_history") {
       toolResult = await executeGetSalesHistory(
         supabase,
         shopId,
-        args.dateQuery || "today"
+        args.dateQuery || "today",
+        {
+          unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
+          itemName: args.itemName,
+        }
       );
     } else if (toolName === "query_restock_orders") {
       toolResult = await executeGetRestockOrdersSummary(
@@ -625,6 +757,11 @@ export async function saveLiveTurnAction(input: {
     }
 
     if (assistantText?.trim()) {
+      const focusedProd =
+        pendingAction?.productName ||
+        pendingAction?.items?.[0]?.productName ||
+        null;
+
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
         user_id: user.id,
@@ -635,6 +772,7 @@ export async function saveLiveTurnAction(input: {
           conversationId: conversationId || null,
           liveSession: true,
           pendingAction: pendingAction || null,
+          lastFocusedProduct: focusedProd,
         },
       });
     }

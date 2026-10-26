@@ -20,6 +20,10 @@ import {
   ShoppingCart,
   Truck,
   Receipt,
+  Share2,
+  Copy,
+  ExternalLink,
+  MessageCircle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -155,6 +159,36 @@ export function AssistantConfirmationCard({
       ? action.quantity
       : 1
   );
+
+  // Editable fields for create_restock_order
+  const [restockOrderItems, setRestockOrderItems] = useState<
+    Array<{
+      productId?: string;
+      productName: string;
+      quantity: number;
+      currentStock?: number | null;
+      isNewItem?: boolean;
+    }>
+  >(() => {
+    if (action.orderItems && action.orderItems.length > 0) {
+      return action.orderItems.map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        quantity: it.quantity > 0 ? it.quantity : 10,
+        currentStock: it.currentStock,
+        isNewItem: it.isNewItem,
+      }));
+    }
+    return [
+      {
+        productId: action.productId,
+        productName: action.productName || "Item",
+        quantity: action.openingStock || 10,
+        currentStock: action.currentStock,
+        isNewItem: false,
+      },
+    ];
+  });
 
   // 1. Handle Stock Adjustment Confirmation
   const handleConfirmAdjust = async () => {
@@ -366,6 +400,57 @@ export function AssistantConfirmationCard({
     setDoneMessage(`Price updated: ${action.productName} selling price is now ₹${p}.`);
     toast.success(`Updated ${action.productName} price to ₹${p}!`);
     onSuccess(res.message || `Price updated to ₹${p}`);
+  };
+
+  // 5. Handle Restock Order Confirmation & Sharing
+  const handleConfirmCreateRestockOrder = async () => {
+    if (restockOrderItems.length === 0) {
+      toast.error("Please add at least one item to order");
+      return;
+    }
+
+    setIsSubmitting(true);
+    const res = await confirmAssistantActionExecution({
+      shopId,
+      actionType: "create_restock_order",
+      orderItems: restockOrderItems,
+      distributorName: action.distributorName,
+      reason: action.reason || "Created via Koro Assistant",
+      shareText: action.shareText,
+      whatsappUrl: action.whatsappUrl,
+      productName: action.productName || restockOrderItems[0]?.productName,
+    });
+    setIsSubmitting(false);
+
+    if (!res.success) {
+      toast.error(res.error || "Failed to create restock order");
+      return;
+    }
+
+    setIsDone(true);
+    setDoneMessage(res.message || "Restock order created successfully!");
+    toast.success("Restock order saved!");
+    onSuccess(res.message || "Created restock order");
+  };
+
+  const handleCopyOrderText = () => {
+    const textToCopy =
+      action.shareText ||
+      restockOrderItems.map((it) => `• ${it.productName}: ${it.quantity} units`).join("\n");
+    navigator.clipboard.writeText(textToCopy);
+    toast.success("Order text copied to clipboard!");
+  };
+
+  const handleShareWhatsApp = () => {
+    if (action.whatsappUrl) {
+      window.open(action.whatsappUrl, "_blank", "noopener,noreferrer");
+    } else {
+      const textToCopy =
+        action.shareText ||
+        restockOrderItems.map((it) => `• ${it.productName}: ${it.quantity} units`).join("\n");
+      const url = `https://wa.me/?text=${encodeURIComponent(textToCopy)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
   };
 
   // Done Success State
@@ -1037,6 +1122,151 @@ export function AssistantConfirmationCard({
               <>
                 <PackageCheck className="h-3.5 w-3.5" />
                 <span>Confirm Delivery Arrival</span>
+              </>
+            )}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onCancel}
+            disabled={isSubmitting}
+            className="text-xs h-8 cursor-pointer"
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // DRAFT PURCHASE RESTOCK ORDER CARD (with WhatsApp Link & Confirm)
+  // --------------------------------------------------------------------------
+  if (action.actionType === "create_restock_order") {
+    const totalOrderUnits = restockOrderItems.reduce((acc, it) => acc + (it.quantity || 0), 0);
+
+    return (
+      <div className="p-3.5 sm:p-4 rounded-xl border border-indigo-500/40 bg-card/95 shadow-md space-y-3.5 animate-fadeIn">
+        <div className="flex items-center justify-between pb-2 border-b border-border/50">
+          <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+            <div className="h-6 w-6 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
+              <ShoppingCart className="h-3.5 w-3.5" />
+            </div>
+            <span>Draft Restock Order (सामान मँगवाने का ऑर्डर)</span>
+          </div>
+          <Badge
+            variant="outline"
+            className="border-indigo-500/30 text-indigo-700 dark:text-indigo-300 bg-indigo-500/5 text-[10px] py-0 px-2 font-semibold"
+          >
+            {action.distributorName ? `Supplier: ${action.distributorName}` : "New Order Slip"}
+          </Badge>
+        </div>
+
+        {/* Order Items List */}
+        <div className="space-y-2">
+          <div className="rounded-lg border border-border/60 overflow-hidden divide-y divide-border/40 bg-muted/20">
+            {restockOrderItems.map((it, idx) => (
+              <div
+                key={idx}
+                className="p-2 sm:p-2.5 flex items-center justify-between gap-2 text-xs"
+              >
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-semibold text-foreground truncate">
+                      {it.productName}
+                    </span>
+                    {it.isNewItem && (
+                      <Badge
+                        variant="secondary"
+                        className="text-[9px] py-0 px-1.5 h-4 bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                      >
+                        New Item
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    Current In-Stock: {it.currentStock ?? 0} units
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[11px] text-muted-foreground font-medium">Qty:</span>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={it.quantity}
+                    onChange={(e) => {
+                      const val = Math.max(1, parseInt(e.target.value, 10) || 1);
+                      setRestockOrderItems((prev) =>
+                        prev.map((item, i) => (i === idx ? { ...item, quantity: val } : item))
+                      );
+                    }}
+                    disabled={isSubmitting}
+                    className="h-7 w-16 text-center text-xs font-bold bg-background"
+                  />
+                  <span className="text-[11px] text-muted-foreground">units</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between text-xs px-1 text-muted-foreground">
+            <span>Total Items: <strong className="text-foreground">{restockOrderItems.length}</strong></span>
+            <span>Total Units to Order: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{totalOrderUnits} units</strong></span>
+          </div>
+        </div>
+
+        {/* WhatsApp & Copy Share Toolbar */}
+        <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+              <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
+              Supplier WhatsApp Share
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleCopyOrderText}
+              className="h-6 px-2 text-[10px] text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 gap-1 cursor-pointer"
+            >
+              <Copy className="h-3 w-3" />
+              Copy Text
+            </Button>
+          </div>
+
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleShareWhatsApp}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs h-8 gap-1.5 cursor-pointer shadow-xs"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            <span>Share Order via WhatsApp (व्हाट्सएप पर भेजें)</span>
+            <ExternalLink className="h-3 w-3 opacity-70" />
+          </Button>
+        </div>
+
+        {/* Confirmation & Cancel Buttons */}
+        <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleConfirmCreateRestockOrder}
+            disabled={isSubmitting}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs h-8 gap-1.5 cursor-pointer shadow-xs"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Saving Restock Slip...</span>
+              </>
+            ) : (
+              <>
+                <PackageCheck className="h-3.5 w-3.5" />
+                <span>Confirm &amp; Save Order Slip (ऑर्डर सेव करें)</span>
               </>
             )}
           </Button>

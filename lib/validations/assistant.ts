@@ -25,6 +25,7 @@ export const confirmAssistantActionSchema = z.object({
     "delete_product",
     "record_sale",
     "record_order_arrival",
+    "create_restock_order",
   ]),
   productId: z.string().uuid().optional(),
   productName: z.string().min(1),
@@ -66,6 +67,21 @@ export const confirmAssistantActionSchema = z.object({
   orderItemId: z.string().uuid().optional(),
   orderNumber: z.string().optional(),
   receivedQuantity: z.number().int().positive().optional(),
+  // For create_restock_order
+  orderItems: z
+    .array(
+      z.object({
+        productId: z.string().uuid().optional(),
+        productName: z.string().min(1),
+        quantity: z.number().int().positive(),
+        currentStock: z.number().nullable().optional(),
+        isNewItem: z.boolean().optional(),
+      })
+    )
+    .optional(),
+  distributorName: z.string().optional(),
+  shareText: z.string().optional(),
+  whatsappUrl: z.string().optional(),
 });
 
 

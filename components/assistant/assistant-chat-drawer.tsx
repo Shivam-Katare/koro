@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { AssistantMessageItem } from "./assistant-message-item";
 import { AssistantConfirmationCard } from "./assistant-confirmation-card";
 import { KoroFace } from "@/components/brand/koro-face";
+import { KoroVoiceVisualizer } from "./koro-voice-visualizer";
+import { AssistantFloatingLivePill } from "./assistant-floating-live-pill";
 import { useGeminiLive } from "@/lib/hooks/use-gemini-live";
 import {
   queryAssistantAction,
@@ -33,50 +35,6 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
-
-// Compact audio level meter for Live Mode: five small bars, one colour
-function AudioEqualizer({
-  micVolume,
-  assistantVolume,
-  status,
-  isMuted,
-}: {
-  micVolume: number;
-  assistantVolume: number;
-  status: string;
-  isMuted: boolean;
-}) {
-  const activeVol = status === "speaking" ? assistantVolume : micVolume;
-  const factors = [0.45, 0.95, 1.25, 0.8, 0.55];
-
-  return (
-    <div className="flex h-6 shrink-0 items-center gap-1" aria-hidden="true">
-      {factors.map((factor, idx) => {
-        let height = 4;
-        if (!isMuted) {
-          if (status === "speaking" || status === "listening") {
-            height = Math.max(
-              4,
-              Math.min(22, Math.round(activeVol * 40 * factor + (activeVol > 0.05 ? 6 : 4)))
-            );
-          } else if (status === "processing") {
-            height = idx % 2 === 0 ? 14 : 8;
-          }
-        }
-        return (
-          <span
-            key={idx}
-            style={{ height: `${height}px` }}
-            className={cn(
-              "w-1 rounded-full transition-all duration-75",
-              isMuted ? "bg-muted-foreground/40" : "bg-primary"
-            )}
-          />
-        );
-      })}
-    </div>
-  );
-}
 
 function formatConvTime(dateStr: string) {
   try {
@@ -702,11 +660,43 @@ export function AssistantChatDrawer({
               {!hasThread ? (
                 /* Centered empty state */
                 <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center gap-6 text-center">
-                  <KoroFace size={80} tone="marigold" />
+                  {isLive ? (
+                    <div className="flex flex-col items-center gap-4 py-2">
+                      <KoroVoiceVisualizer
+                        variant="orb"
+                        size={84}
+                        micVolume={micVolume}
+                        assistantVolume={assistantVolume}
+                        status={liveStatus}
+                        isMuted={isMuted}
+                      />
+                      <KoroVoiceVisualizer
+                        variant="wave"
+                        width={210}
+                        height={40}
+                        micVolume={micVolume}
+                        assistantVolume={assistantVolume}
+                        status={liveStatus}
+                        isMuted={isMuted}
+                      />
+                    </div>
+                  ) : (
+                    <KoroFace size={80} tone="marigold" />
+                  )}
 
                   <div className="space-y-2">
                     <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
-                      {isLive ? "Speak whenever you are ready" : "How can I help you today?"}
+                      {isLive
+                        ? isMuted
+                          ? "Microphone is muted"
+                          : liveStatus === "speaking"
+                          ? "Koro is speaking..."
+                          : liveStatus === "listening"
+                          ? "Listening to you..."
+                          : liveStatus === "processing"
+                          ? "Checking store records..."
+                          : "Connecting to Koro..."
+                        : "How can I help you today?"}
                     </h2>
                     <p className="text-base text-muted-foreground">
                       {isLive
@@ -853,42 +843,59 @@ export function AssistantChatDrawer({
 
             {/* Bottom controls: Live call bar OR text input */}
             {isLive ? (
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-4 @sm:px-5">
+              <div className="flex shrink-0 items-center justify-between gap-2.5 sm:gap-3 border-t border-border bg-card/70 backdrop-blur-md px-3 sm:px-4 py-3.5 @sm:px-5">
                 <button
                   type="button"
                   onClick={toggleMute}
                   title={isMuted ? "Unmute microphone" : "Mute microphone"}
                   aria-pressed={isMuted}
                   className={cn(
-                    "inline-flex h-12 shrink-0 cursor-pointer items-center gap-2 rounded-full px-4 text-base font-medium transition-colors @sm:px-5",
+                    "inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full px-3.5 text-sm font-semibold transition-all @sm:px-4",
                     isMuted
-                      ? "bg-destructive/10 text-destructive"
+                      ? "bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-400/30 shadow-[0_0_8px_rgba(251,191,36,0.25)] animate-pulse"
                       : "bg-muted text-foreground hover:bg-secondary hover:text-primary"
                   )}
                 >
-                  {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                  {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                   <span className="hidden @sm:inline">{isMuted ? "Unmute" : "Mute"}</span>
                 </button>
 
-                <div className="flex min-w-0 items-center gap-3">
-                  <AudioEqualizer
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 overflow-hidden">
+                  <KoroVoiceVisualizer
+                    variant="wave"
+                    width={140}
+                    height={34}
                     micVolume={micVolume}
                     assistantVolume={assistantVolume}
                     status={liveStatus}
                     isMuted={isMuted}
                   />
-                  <span className="truncate text-base font-medium text-foreground" aria-live="polite">
-                    {liveLabel}
-                  </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={cn(
+                        "h-2 w-2 rounded-full shrink-0 transition-all",
+                        isMuted
+                          ? "bg-amber-400"
+                          : liveStatus === "speaking"
+                          ? "bg-fuchsia-400 shadow-[0_0_6px_#d946ef] animate-pulse"
+                          : liveStatus === "listening"
+                          ? "bg-cyan-400 shadow-[0_0_6px_#00f2fe] animate-pulse"
+                          : "bg-sky-400 animate-ping"
+                      )}
+                    />
+                    <span className="truncate text-xs sm:text-sm font-semibold text-foreground" aria-live="polite">
+                      {liveLabel}
+                    </span>
+                  </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={stopSession}
                   title="End the live conversation"
-                  className="inline-flex h-12 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-destructive px-4 text-base font-semibold text-white transition-opacity hover:opacity-90 active:scale-95 @sm:px-5"
+                  className="inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-red-600 hover:bg-red-500 px-3.5 sm:px-4 text-sm font-semibold text-white shadow-[0_0_12px_rgba(239,68,68,0.45)] transition-all hover:opacity-90 active:scale-95"
                 >
-                  <PhoneOff className="h-5 w-5" />
+                  <PhoneOff className="h-4 w-4" />
                   <span className="hidden @sm:inline">End</span>
                 </button>
               </div>
@@ -968,6 +975,19 @@ export function AssistantChatDrawer({
           </div>
         )}
       </aside>
+
+      {/* Floating live call pill in bottom-right when drawer is closed/minimized */}
+      <AssistantFloatingLivePill
+        isLive={isLive}
+        isOpen={isOpen}
+        status={liveStatus}
+        isMuted={isMuted}
+        micVolume={micVolume}
+        assistantVolume={assistantVolume}
+        onToggleMute={toggleMute}
+        onStop={stopSession}
+        onReopen={() => onOpenChange(true)}
+      />
     </>
   );
 }

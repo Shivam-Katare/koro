@@ -9,7 +9,11 @@ import {
 } from "@/lib/validations/assistant";
 import { GoogleGenAI, Type } from "@google/genai";
 import { revalidatePath } from "next/cache";
-import { recordItemArrivalAction } from "@/lib/actions/restock-actions";
+import {
+  recordItemArrivalAction,
+  createRestockOrderAction,
+  quickAddRestockItemAction,
+} from "@/lib/actions/restock-actions";
 
 export interface AssistantResponsePayload {
   role: "assistant";
@@ -29,6 +33,8 @@ export interface AssistantResponsePayload {
     | "restock_orders"
     | "record_order_arrival"
     | "inventory_summary"
+    | "daily_reminders"
+    | "create_restock_order"
     | "general";
   structuredData?: any;
   pendingAction?: AssistantPendingAction | null;
@@ -52,6 +58,8 @@ import {
   executeGetSalesHistory,
   executeGetRestockOrdersSummary,
   executeProposeRecordArrival,
+  executeGetDailyReminders,
+  executeProposeCreateRestockOrder,
   matchLocalIntent,
 } from "@/lib/assistant/assistant-db";
 
@@ -92,13 +100,51 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     },
   });
 
+  // Extract recent conversational context & last focused product
+  let lastFocusedProduct: string | undefined = undefined;
+  try {
+    const { data: recentMsgs } = await (supabase.from("assistant_messages") as any)
+      .select("metadata, content, task_type")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    if (recentMsgs && recentMsgs.length > 0) {
+      for (const m of recentMsgs) {
+        const meta = (m.metadata as any) || {};
+        if (meta.lastFocusedProduct) {
+          lastFocusedProduct = meta.lastFocusedProduct;
+          break;
+        }
+        if (meta.pendingAction?.productName) {
+          lastFocusedProduct = meta.pendingAction.productName;
+          break;
+        }
+        if (meta.productName) {
+          lastFocusedProduct = meta.productName;
+          break;
+        }
+        if (meta.structuredData?.product?.name) {
+          lastFocusedProduct = meta.structuredData.product.name;
+          break;
+        }
+        if (meta.structuredData?.matchedProduct?.name) {
+          lastFocusedProduct = meta.structuredData.matchedProduct.name;
+          break;
+        }
+      }
+    }
+  } catch (ctxErr) {
+    // Non-blocking
+  }
+
   const apiKey =
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
   // Check fast local intent first (saves 100% of LLM tokens for standard phrases)
-  const localMatch = matchLocalIntent(query);
+  const localMatch = matchLocalIntent(query, lastFocusedProduct);
   if (localMatch) {
     let resultPayload: AssistantResponsePayload | null = null;
 
@@ -159,7 +205,15 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
       });
       resultPayload = { role: "assistant", ...res };
     } else if (localMatch.intent === "sales_history") {
-      const res = await executeGetSalesHistory(supabase, shopId, (localMatch as any).dateQuery);
+      const res = await executeGetSalesHistory(
+        supabase,
+        shopId,
+        (localMatch as any).dateQuery,
+        {
+          unitPrice: (localMatch as any).unitPrice,
+          itemName: (localMatch as any).itemName,
+        }
+      );
       resultPayload = { role: "assistant", ...res };
     } else if (localMatch.intent === "update_slip_note") {
       const res = await executeUpdateSlipNote(supabase, shopId, {
@@ -171,9 +225,28 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     } else if (localMatch.intent === "restock_orders") {
       const res = await executeGetRestockOrdersSummary(supabase, shopId, (localMatch as any).queryType);
       resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "daily_reminders") {
+      const res = await executeGetDailyReminders(supabase, shopId);
+      resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "create_restock_order" && ((localMatch as any).items?.length || (localMatch as any).target)) {
+      const items = (localMatch as any).items || [
+        { productName: (localMatch as any).target, quantity: (localMatch as any).quantity || 10 },
+      ];
+      const res = await executeProposeCreateRestockOrder(supabase, shopId, {
+        items,
+        distributorName: (localMatch as any).distributorName,
+      });
+      resultPayload = { role: "assistant", ...res };
     }
 
     if (resultPayload) {
+      const focusedProd =
+        resultPayload.pendingAction?.productName ||
+        resultPayload.structuredData?.product?.name ||
+        resultPayload.structuredData?.matchedProduct?.name ||
+        lastFocusedProduct ||
+        null;
+
       // Save assistant response to DB
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
@@ -185,6 +258,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
           conversationId: conversationId || null,
           structuredData: resultPayload.structuredData || null,
           pendingAction: resultPayload.pendingAction || null,
+          lastFocusedProduct: focusedProd,
         },
       });
 
@@ -434,14 +508,30 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
               },
             },
             {
+              name: "get_daily_reminders",
+              description: "Get gentle daily store reminders (unassigned locations, out-of-stock items, pending supplier deliveries) for the shopkeeper. When speaking, highlight naturally without reading like a dry newspaper list.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {},
+              },
+            },
+            {
               name: "query_sales_history",
-              description: "Lookup past sales slips and total earnings/revenue for a specific date or period (e.g. 'How much money did I sell', 'On 20th January 2026 how much money did I earn', 'today sales', 'this week sales').",
+              description: "Lookup past sales slips and total earnings/revenue for a specific date or period, or inspect specific line items sold (e.g. 'How much money did I sell', 'On 20th January 2026 how much money did I earn', 'On 24 October what is the item I sold that was 30', 'Did I sell Lakme yesterday').",
               parameters: {
                 type: Type.OBJECT,
                 properties: {
                   dateQuery: {
                     type: Type.STRING,
-                    description: "Target date or period (e.g. 'today', 'yesterday', 'this week', 'this month', '20th January 2026')",
+                    description: "Target date or period (e.g. 'today', 'yesterday', 'this week', 'this month', '24 October', '20th January 2026')",
+                  },
+                  unitPrice: {
+                    type: Type.NUMBER,
+                    description: "Optional specific unit price to filter line items (e.g. 30 for 'item sold that was 30')",
+                  },
+                  itemName: {
+                    type: Type.STRING,
+                    description: "Optional product or item name to filter in past slips",
                   },
                 },
               },
@@ -457,6 +547,42 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
                     description: "Type of inquiry: 'cancelled', 'waiting', 'delivered', 'needs_reorder', or 'all'",
                   },
                 },
+              },
+            },
+            {
+              name: "propose_create_restock_order",
+              description: "Draft a purchase restock order slip for one or multiple products (e.g. 'Add 10 units of serum and Nivea cream to my slip', 'Order 5 Lakme Kajal and 10 Dettol soap'). Supports both existing catalog products and new unlisted products. Provides a confirmation card with WhatsApp supplier link.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  items: {
+                    type: Type.ARRAY,
+                    description: "Array of restock order line items with product name and quantity to order",
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        productName: {
+                          type: Type.STRING,
+                          description: "Name of the product to order",
+                        },
+                        quantity: {
+                          type: Type.INTEGER,
+                          description: "Units to order (default 10)",
+                        },
+                      },
+                      required: ["productName"],
+                    },
+                  },
+                  distributorName: {
+                    type: Type.STRING,
+                    description: "Optional supplier or distributor name",
+                  },
+                  notes: {
+                    type: Type.STRING,
+                    description: "Optional purchase order notes",
+                  },
+                },
+                required: ["items"],
               },
             },
             {
@@ -484,18 +610,44 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
         },
       ];
 
-      const { data: currentShop } = await (supabase.from("shops") as any)
-        .select("name, category, description")
-        .eq("id", shopId)
-        .maybeSingle();
+      const [shopRes, ownerProfileRes, prodCountRes, slipsCountRes] = await Promise.all([
+        (supabase.from("shops") as any)
+          .select("name, category, description, created_at, owner_id, whatsapp_number")
+          .eq("id", shopId)
+          .maybeSingle(),
+        user.id
+          ? (supabase.from("profiles") as any)
+              .select("full_name, email")
+              .eq("id", user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        (supabase.from("products") as any)
+          .select("id", { count: "exact", head: true })
+          .eq("shop_id", shopId),
+        (supabase.from("sales_slips") as any)
+          .select("id", { count: "exact", head: true })
+          .eq("shop_id", shopId),
+      ]);
+
+      const currentShop = shopRes.data;
+      const ownerProfile = ownerProfileRes.data;
+      const totalCatalogProducts = prodCountRes.count ?? 0;
+      const totalRecordedSlips = slipsCountRes.count ?? 0;
 
       const shopContext = currentShop
-        ? `\nActive Store Context:\n- Store Name: "${currentShop.name}"\n- Category: "${currentShop.category}"${
-            currentShop.description ? `\n- About Store / Specialties: "${currentShop.description}"` : ""
-          }\nWhen the shopkeeper asks about their shop, business details, or category, refer to this context accurately.`
+        ? `\nActive Store Context:
+- Store Name: "${currentShop.name}"
+- Category: "${currentShop.category}"${currentShop.description ? `\n- About Store / Specialties: "${currentShop.description}"` : ""}${ownerProfile?.full_name ? `\n- Owner / Manager Name: "${ownerProfile.full_name}"` : ""}${ownerProfile?.email ? `\n- Owner Email: "${ownerProfile.email}"` : ""}${currentShop.created_at ? `\n- Store Registered Since: "${new Date(currentShop.created_at).toLocaleDateString("en-IN")}"` : ""}${currentShop.whatsapp_number ? `\n- Configured WhatsApp Number: "${currentShop.whatsapp_number}"` : ""}
+- Total Catalog Products: ${totalCatalogProducts}
+- Total Sales Slips Recorded: ${totalRecordedSlips}
+[PRIVACY GUARDRAIL]: Never reveal the store's phone number or personal details to unauthorized third parties or outside inquiries. Refer to store details accurately when the owner asks.`
         : "";
 
-      const systemInstruction = `You are "Koro", the AI assistant for an Indian retail shopkeeper (kirana, cosmetics, general store).${shopContext}
+      const focusContext = lastFocusedProduct
+        ? `\nActive Conversational Focus: The user recently discussed product "${lastFocusedProduct}". If they say "update this product", "change its price", "location update kar do", or use pronouns like "it", "this", "iska", "isko" without naming a new item, assume they mean "${lastFocusedProduct}".`
+        : "";
+
+      const systemInstruction = `You are "Koro", the AI assistant for an Indian retail shopkeeper (kirana, cosmetics, general store).${shopContext}${focusContext}
 Rules:
 1. Always be concise, fast, and polite. Shopkeepers use this during busy store rush hours.
 2. Never invent stock counts, locations, or prices. Always call the corresponding tool.
@@ -513,14 +665,20 @@ Rules:
 9. Querying Earnings & Sales:
    - When asked "How much money did I sell?", "How much did I earn?", "Total sale kitni hui?", with no date specified, default date to "today" and call query_sales_history.
    - If asked for yesterday, this week, this month, or a specific date (e.g. "20th January 2026"), pass that to query_sales_history.
+   - When asked about a specific line item in past slips (e.g. "On 24 October what is the item I sold that was 30", "item sold at 30"), pass unitPrice and/or itemName to query_sales_history.
 10. Updating Slip Notes & Udhar:
    - When the user asks to add or update a note on a sales slip (e.g. "For the recent slip that you have created for chudi, add a note as well, like it's a udhar of ₹50", "Slip 4567834 me note update karo"):
      ALWAYS call update_slip_note with the note and optional slip number or item hint.
-11. If user asks about restock orders, cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order, call query_restock_orders.
-12. If user says an order or restock arrived, call propose_record_order_arrival.
-13. If user asks to delete a product (e.g. "Delete product Lakme"), call propose_delete_product. Never delete without confirmation.
-14. If multiple items match, the tools will automatically return clarifying options. Be friendly and helpful.
-15. Support English, Hindi, and Hinglish. Keep your final answer short and clear.`;
+11. Daily Reminders:
+   - When the user asks "What are my reminders today?", "Aaj ke reminder kya hain?", or about store tasks, call get_daily_reminders. Respond naturally and conversationally (highlighting unassigned locations, low stock, or pending deliveries), avoiding reading like a dry newspaper list.
+12. Restock Orders, Status & Queries:
+   - When user asks about cancelled orders, waiting orders, delivered orders, unit counts, or whether they need to place a new order, call query_restock_orders.
+13. Drafting Restock Orders:
+   - When user asks to draft or create a restock order/slip (e.g. "Add 10 units of serum and Nivea cream to my slip", "Order 10 serum"), call propose_create_restock_order. This provides a draft confirmation card with WhatsApp share link.
+14. If user says an order or restock arrived, call propose_record_order_arrival.
+15. If user asks to delete a product (e.g. "Delete product Lakme"), call propose_delete_product. Never delete without confirmation.
+16. Conversational Memory: If the user just updated or discussed a product (e.g. updated location of Lakme) and then says "update this product's price as well" or "price 50 kar do", remember that "this product" refers to the focused product without asking "which product".
+17. Support English, Hindi, and Hinglish. Keep your final answer short and clear.`;
 
       const response = await ai.models.generateContent({
         model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
@@ -601,11 +759,23 @@ Rules:
               slipNumber: args.slipNumber,
               itemHint: args.itemHint,
             });
+          } else if (call.name === "get_daily_reminders") {
+            toolResult = await executeGetDailyReminders(supabase, shopId);
+          } else if (call.name === "propose_create_restock_order") {
+            toolResult = await executeProposeCreateRestockOrder(supabase, shopId, {
+              items: args.items,
+              distributorName: args.distributorName,
+              notes: args.notes,
+            });
           } else if (call.name === "query_sales_history") {
             toolResult = await executeGetSalesHistory(
               supabase,
               shopId,
-              args.dateQuery || "today"
+              args.dateQuery || "today",
+              {
+                unitPrice: args.unitPrice !== undefined ? Number(args.unitPrice) : undefined,
+                itemName: args.itemName,
+              }
             );
           } else if (call.name === "query_restock_orders") {
             toolResult = await executeGetRestockOrdersSummary(
@@ -1177,6 +1347,89 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       revalidatePath("/dashboard");
       return { success: true, message: confirmMsg, newStock: res.newStock };
+    }
+
+    if (actionType === "create_restock_order") {
+      const rawOrderItems = parseResult.data.orderItems || [];
+      if (rawOrderItems.length === 0 && parseResult.data.productName) {
+        rawOrderItems.push({
+          productId: parseResult.data.productId,
+          productName: parseResult.data.productName,
+          quantity: parseResult.data.openingStock || 10,
+        });
+      }
+
+      if (rawOrderItems.length === 0) {
+        throw new Error("No restock items specified");
+      }
+
+      const finalItems: Array<{
+        productId: string;
+        productName: string;
+        quantity: number;
+      }> = [];
+
+      for (const it of rawOrderItems) {
+        let pId = it.productId;
+        if (!pId) {
+          // If brand new or unlinked item, create/link it via quickAddRestockItemAction
+          const quickAddRes = await quickAddRestockItemAction({
+            shopId,
+            name: it.productName,
+            quantity: it.quantity,
+          });
+          if (quickAddRes.success && quickAddRes.product) {
+            pId = quickAddRes.product.id;
+          }
+        }
+
+        if (pId) {
+          finalItems.push({
+            productId: pId,
+            productName: it.productName,
+            quantity: it.quantity,
+          });
+        }
+      }
+
+      if (finalItems.length === 0) {
+        throw new Error("Could not prepare items for restock order");
+      }
+
+      const orderRes = await createRestockOrderAction({
+        shopId,
+        channel: "whatsapp",
+        distributorName: parseResult.data.distributorName || undefined,
+        notes: parseResult.data.reason || "Created via Koro Assistant",
+        items: finalItems,
+      });
+
+      if (!orderRes.success || !orderRes.order) {
+        throw new Error(orderRes.error || "Failed to create restock order");
+      }
+
+      const orderNumber = orderRes.order.order_number;
+      const totalUnits = orderRes.order.total_units;
+      const confirmMsg = `✅ **Restock Order Created!** Slip **#${orderNumber}** has been recorded with ${finalItems.length} items (${totalUnits} units total).`;
+
+      await (supabase.from("assistant_messages") as any).insert({
+        shop_id: shopId,
+        user_id: user.id,
+        role: "assistant",
+        content: confirmMsg,
+        task_type: "create_restock_order",
+        metadata: {
+          confirmed: true,
+          orderNumber,
+          orderId: orderRes.order.id,
+          totalUnits,
+          itemsCount: finalItems.length,
+          lastFocusedProduct: finalItems[0]?.productName,
+        },
+      });
+
+      revalidatePath("/dashboard");
+      return { success: true, message: confirmMsg, order: orderRes.order };
     }
 
     return { success: false, error: "Unsupported action type" };

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { computeGentleReminders } from "@/lib/utils/home-reminders";
 
 export type AssistantSaleLineItem = {
   productId?: string;
@@ -12,6 +13,14 @@ export type AssistantSaleLineItem = {
   isOutOfStock?: boolean;
 };
 
+export type AssistantRestockOrderItem = {
+  productId?: string;
+  productName: string;
+  quantity: number;
+  currentStock?: number | null;
+  isNewItem?: boolean;
+};
+
 export type AssistantPendingAction = {
   actionType:
     | "adjust_stock"
@@ -20,7 +29,8 @@ export type AssistantPendingAction = {
     | "update_price"
     | "delete_product"
     | "record_sale"
-    | "record_order_arrival";
+    | "record_order_arrival"
+    | "create_restock_order";
   productId?: string;
   productName: string;
   currentStock?: number | null;
@@ -48,6 +58,11 @@ export type AssistantPendingAction = {
   orderItemId?: string;
   orderNumber?: string;
   receivedQuantity?: number;
+  // For create_restock_order
+  orderItems?: AssistantRestockOrderItem[];
+  distributorName?: string;
+  shareText?: string;
+  whatsappUrl?: string;
 };
 
 export interface AssistantExecutionResult {
@@ -67,18 +82,53 @@ export interface AssistantExecutionResult {
     | "restock_orders"
     | "record_order_arrival"
     | "inventory_summary"
+    | "daily_reminders"
+    | "create_restock_order"
     | "general";
   structuredData?: any;
   pendingAction?: AssistantPendingAction | null;
 }
 
-// Helper to resolve product matches, handling exact matches, partial matches, and duplicates
-export function resolveProductMatch(products: any[], query: string): {
+// Helper to resolve product matches, handling exact matches, partial matches, duplicates, and conversational pronouns
+export function resolveProductMatch(
+  products: any[],
+  query: string,
+  fallbackProductName?: string
+): {
   matched: any[];
   bestMatch: any | null;
   distinctNames: string[];
 } {
-  const cleanQ = query.trim().toLowerCase();
+  let cleanQ = (query || "").trim().toLowerCase();
+
+  // Conversational pronoun / context resolution
+  const isPronounQuery =
+    !cleanQ ||
+    [
+      "this product",
+      "is product",
+      "ye product",
+      "this",
+      "it",
+      "its",
+      "this item",
+      "ye item",
+      "is item",
+      "the product",
+      "product",
+      "item",
+      "isko",
+      "iska",
+      "iski",
+      "use",
+      "uska",
+      "uski",
+    ].includes(cleanQ);
+
+  if (isPronounQuery && fallbackProductName && fallbackProductName.trim()) {
+    cleanQ = fallbackProductName.trim().toLowerCase();
+  }
+
   const cleanQStem = cleanQ.replace(/(?:es|s)$/i, "");
 
   const matched = (products || []).filter((p: any) => {
@@ -1048,12 +1098,106 @@ export async function executeUpdateSlipNote(
 }
 
 // -------------------------------------------------------------
-// Sales History & Earnings Lookup
+// Daily Store Reminders Lookup
+// -------------------------------------------------------------
+export async function executeGetDailyReminders(
+  supabase: any,
+  shopId: string
+): Promise<AssistantExecutionResult> {
+  const [prodsRes, ordersRes, movesRes, slipsRes, shopRes] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, name, current_stock, min_stock_threshold, stock_status, storage_location, description, brand")
+      .eq("shop_id", shopId),
+    (supabase.from("restock_orders") as any)
+      .select("*")
+      .eq("shop_id", shopId),
+    (supabase.from("stock_movements") as any)
+      .select("*")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: false })
+      .limit(20),
+    (supabase.from("sales_slips") as any)
+      .select("*")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: false })
+      .limit(20),
+    (supabase.from("shops") as any)
+      .select("name, category")
+      .eq("id", shopId)
+      .maybeSingle(),
+  ]);
+
+  const products = (prodsRes.data || []) as any[];
+  const restockOrders = (ordersRes.data || []) as any[];
+  const stockMovements = (movesRes.data || []) as any[];
+  const salesSlips = (slipsRes.data || []) as any[];
+  const shopCategory = shopRes.data?.category || "General Store";
+
+  const reminders = computeGentleReminders({
+    products,
+    restockOrders,
+    stockMovements,
+    salesSlips,
+    shopCategory,
+  });
+
+  if (reminders.length === 0) {
+    return {
+      content: "Aapki shop mein sabhi cheezein healthy hain! Koi item out of stock nahi hai aur na hi koi pending delivery hai.",
+      taskType: "daily_reminders",
+      structuredData: { reminders: [] },
+    };
+  }
+
+  // Construct natural, conversational summary (avoid reading newspaper bullet lists)
+  const highlights: string[] = [];
+  const outOfStock = products.filter(
+    (p) => p.current_stock <= 0 || p.stock_status === "out_of_stock"
+  );
+  if (outOfStock.length > 0) {
+    const oosNames = outOfStock.slice(0, 2).map((p) => p.name).join(" aur ");
+    highlights.push(`${outOfStock.length} items completely out of stock hain (${oosNames})`);
+  }
+
+  const unassigned = products.filter((p) => !p.storage_location || p.storage_location.trim() === "");
+  if (unassigned.length > 0) {
+    highlights.push(`${unassigned.length} item ka shelf location set nahi hai`);
+  }
+
+  const pending = restockOrders.filter((o) => o.status === "ordered");
+  if (pending.length > 0) {
+    highlights.push(`${pending.length} restock order ki delivery pending hai`);
+  }
+
+  const seasonal = reminders.find((r) => r.category === "seasonal");
+  if (seasonal) {
+    highlights.push(seasonal.title);
+  }
+
+  const spokenAnswer =
+    highlights.length > 0
+      ? `Aapke aaj ke reminders hain: ${highlights.join(", ")}.`
+      : "Aapki dukaan ka stock aur orders bilkul up to date hain.";
+
+  const markdownDetails = reminders.map((r) => `• **${r.title}**: ${r.description}`).join("\n");
+  const content = `${spokenAnswer}\n\n${markdownDetails}`;
+
+  return {
+    content,
+    taskType: "daily_reminders",
+    structuredData: { reminders, highlights },
+  };
+}
+
+// -------------------------------------------------------------
+// Sales History, Line-Item Inspection & Earnings Lookup
 // -------------------------------------------------------------
 export async function executeGetSalesHistory(
   supabase: any,
   shopId: string,
-  dateQuery?: string
+  dateQuery?: string,
+  options?: { unitPrice?: number; itemName?: string }
 ): Promise<AssistantExecutionResult> {
   const { startDate, endDate, label } = parseDateRange(dateQuery);
 
@@ -1085,6 +1229,7 @@ export async function executeGetSalesHistory(
         totalEarnings: 0,
         slipCount: 0,
         unitsSold: 0,
+        lineItems: [],
       },
     };
   }
@@ -1095,9 +1240,14 @@ export async function executeGetSalesHistory(
   );
 
   const slipIds = slipList.map((s: any) => s.id);
+  const slipMap: Record<string, any> = {};
+  for (const s of slipList) {
+    slipMap[s.id] = s;
+  }
+
   const { data: lines } = await (supabase
     .from("sales_slip_lines") as any)
-    .select("raw_item_name, quantity, unit_price, subtotal")
+    .select("id, slip_id, raw_item_name, quantity, unit_price, subtotal, is_tracked, created_at")
     .in("slip_id", slipIds);
 
   const linesList = lines || [];
@@ -1106,21 +1256,126 @@ export async function executeGetSalesHistory(
     0
   );
 
+  interface EnrichedLineItem {
+    id: string;
+    slipId: string;
+    slipNumber: string;
+    itemName: string;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+    createdAt: string;
+  }
+
+  const enrichedLines: EnrichedLineItem[] = linesList.map((l: any): EnrichedLineItem => ({
+    id: l.id,
+    slipId: l.slip_id,
+    slipNumber: slipMap[l.slip_id]?.slip_number || "Slip",
+    itemName: l.raw_item_name || "Item",
+    quantity: Number(l.quantity) || 1,
+    unitPrice: l.unit_price !== null ? Number(l.unit_price) : 0,
+    subtotal: l.subtotal !== null ? Number(l.subtotal) : 0,
+    createdAt: l.created_at,
+  }));
+
+  // Case 1: Filter by specific price (e.g. "What's the one item that I sold that was ₹30?")
+  if (options?.unitPrice !== undefined && options.unitPrice !== null && !isNaN(Number(options.unitPrice))) {
+    const targetPrice = Number(options.unitPrice);
+    const matchedLines = enrichedLines.filter(
+      (l: EnrichedLineItem) => l.unitPrice === targetPrice || l.subtotal === targetPrice
+    );
+
+    if (matchedLines.length > 0) {
+      const distinctMatched = Array.from(new Set(matchedLines.map((l: EnrichedLineItem) => l.itemName)));
+      const itemsList = matchedLines
+        .map((l: EnrichedLineItem) => `• **${l.quantity}x ${l.itemName}** (₹${l.unitPrice} each, Slip #${l.slipNumber})`)
+        .join("\n");
+
+      const primarySpoken =
+        distinctMatched.length === 1
+          ? `**${label}** ko **₹${targetPrice}** mein becha gaya item: **${distinctMatched[0]}** (Slip #${matchedLines[0].slipNumber}).`
+          : `**${label}** ko **₹${targetPrice}** price par ye items beche gaye the:\n${itemsList}`;
+
+      return {
+        content: primarySpoken,
+        taskType: "sales_history",
+        structuredData: {
+          dateLabel: label,
+          unitPriceFilter: targetPrice,
+          matchedItems: matchedLines,
+          totalEarnings,
+          slipCount,
+          lineItems: enrichedLines,
+        },
+      };
+    } else {
+      return {
+        content: `**${label}** ke sales slips mein **₹${targetPrice}** price par koi item nahi mila.`,
+        taskType: "sales_history",
+        structuredData: {
+          dateLabel: label,
+          unitPriceFilter: targetPrice,
+          matchedItems: [],
+          totalEarnings,
+          slipCount,
+          lineItems: enrichedLines,
+        },
+      };
+    }
+  }
+
+  // Case 2: Filter by item name (e.g. "How many Kajals did I sell on 24 October?")
+  if (options?.itemName && options.itemName.trim()) {
+    const term = options.itemName.trim().toLowerCase();
+    const matchedLines = enrichedLines.filter((l: EnrichedLineItem) => l.itemName.toLowerCase().includes(term));
+
+    if (matchedLines.length > 0) {
+      const totalItemQty = matchedLines.reduce((s: number, l: EnrichedLineItem) => s + l.quantity, 0);
+      const totalItemRev = matchedLines.reduce((s: number, l: EnrichedLineItem) => s + l.subtotal, 0);
+      const itemsList = matchedLines
+        .map((l: EnrichedLineItem) => `• **${l.quantity}x ${l.itemName}** at ₹${l.unitPrice} each = ₹${l.subtotal} (Slip #${l.slipNumber})`)
+        .join("\n");
+
+      return {
+        content: `**${label}** ko **${options.itemName}** ke total **${totalItemQty} items** beche gaye (Total: **₹${totalItemRev}**):\n${itemsList}`,
+        taskType: "sales_history",
+        structuredData: {
+          dateLabel: label,
+          itemNameFilter: options.itemName,
+          totalQuantity: totalItemQty,
+          totalRevenue: totalItemRev,
+          matchedItems: matchedLines,
+        },
+      };
+    } else {
+      return {
+        content: `**${label}** ko "${options.itemName}" ki koi sale record nahi hui.`,
+        taskType: "sales_history",
+        structuredData: { dateLabel: label, itemNameFilter: options.itemName, matchedItems: [] },
+      };
+    }
+  }
+
+  // Case 3: General daily summary with line-item breakdown
   const itemCounts: Record<string, number> = {};
-  for (const l of linesList) {
-    const name = l.raw_item_name || "Item";
-    itemCounts[name] = (itemCounts[name] || 0) + (Number(l.quantity) || 0);
+  for (const l of enrichedLines) {
+    itemCounts[l.itemName] = (itemCounts[l.itemName] || 0) + l.quantity;
   }
 
   const topItems = Object.entries(itemCounts)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
+    .slice(0, 5)
     .map(([name, qty]) => `${qty}x ${name}`)
     .join(", ");
 
-  const itemsBreakdown = topItems ? `\n• Items sold: **${topItems}**` : "";
+  const lineItemsList = enrichedLines
+    .slice(0, 8)
+    .map((l: EnrichedLineItem) => `• ${l.quantity}x ${l.itemName} — ₹${l.unitPrice} each (Slip #${l.slipNumber})`)
+    .join("\n");
 
-  const content = `**${label} Sales Report**:\n• Total Earnings: **₹${totalEarnings.toLocaleString("en-IN")}**\n• Total Slips: **${slipCount} bills**\n• Total Units Sold: **${totalUnitsSold} items**${itemsBreakdown}`;
+  const extraLineCount = enrichedLines.length > 8 ? `\n...and ${enrichedLines.length - 8} more items.` : "";
+
+  const content = `**${label} Sales Report**:\n• Total Earnings: **₹${totalEarnings.toLocaleString("en-IN")}**\n• Total Slips: **${slipCount} bills**\n• Total Units Sold: **${totalUnitsSold} items**\n\n**Sold Items Detail**:\n${lineItemsList}${extraLineCount}`;
 
   return {
     content,
@@ -1131,7 +1386,177 @@ export async function executeGetSalesHistory(
       slipCount,
       totalUnitsSold,
       topItems,
+      lineItems: enrichedLines,
     },
+  };
+}
+
+// -------------------------------------------------------------
+// Helper: Build WhatsApp Restock Message Text
+// -------------------------------------------------------------
+export function buildWhatsAppRestockMessageText(params: {
+  shopName: string;
+  items: AssistantRestockOrderItem[];
+  distributorName?: string;
+  notes?: string;
+}): string {
+  const dateStr = new Date().toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+  const lines: string[] = [];
+  lines.push(`📦 *PURCHASE ORDER / RESTOCK LIST*`);
+  lines.push(`🏪 *Shop:* ${params.shopName || "My Retail Store"}`);
+  lines.push(`📅 *Date:* ${dateStr}`);
+  if (params.distributorName?.trim()) {
+    lines.push(`👤 *Supplier / Distributor:* ${params.distributorName.trim()}`);
+  }
+  lines.push(``);
+  lines.push(`*Items to Order:*`);
+
+  params.items.forEach((item, index) => {
+    const stockInfo = item.isNewItem
+      ? `✨ New Item (Catalog mein naya)`
+      : `Current Stock: ${item.currentStock ?? 0}`;
+    lines.push(
+      `${index + 1}. *${item.productName}*\n   👉 *Order: ${item.quantity} units* (${stockInfo})`
+    );
+  });
+
+  const totalUnits = params.items.reduce((sum, item) => sum + item.quantity, 0);
+
+  lines.push(``);
+  lines.push(`----------------------------------------`);
+  lines.push(`📋 *Total Products:* ${params.items.length} items`);
+  lines.push(`🔢 *Total Order Quantity:* ${totalUnits} units`);
+  if (params.notes?.trim()) {
+    lines.push(`📝 *Note:* ${params.notes.trim()}`);
+  }
+  lines.push(``);
+  lines.push(`_Generated via Zibbi Retail Assistant_`);
+
+  return lines.join("\n");
+}
+
+// -------------------------------------------------------------
+// Propose Create Restock Order Draft & WhatsApp Share Link
+// -------------------------------------------------------------
+export async function executeProposeCreateRestockOrder(
+  supabase: any,
+  shopId: string,
+  params: {
+    items: Array<{ productName: string; quantity: number }>;
+    distributorName?: string;
+    notes?: string;
+  }
+): Promise<AssistantExecutionResult> {
+  const rawItems = (params.items || []).filter(
+    (i) => i && i.productName && i.productName.trim() !== ""
+  );
+
+  if (rawItems.length === 0) {
+    return {
+      content: "Kripya restock order ke liye items aur quantity batayein (jaise: '10 serum aur 10 Nivea cream order karo').",
+      taskType: "create_restock_order",
+      pendingAction: null,
+    };
+  }
+
+  const [prodsRes, shopRes] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, name, current_stock, storage_location, brand, description, min_stock_threshold")
+      .eq("shop_id", shopId),
+    (supabase.from("shops") as any)
+      .select("name, whatsapp_number")
+      .eq("id", shopId)
+      .maybeSingle(),
+  ]);
+
+  const allProds = prodsRes.data || [];
+  const shopData = shopRes.data;
+
+  const processedItems: AssistantRestockOrderItem[] = [];
+  for (const item of rawItems) {
+    const cleanName = item.productName.trim();
+    const qty = item.quantity && item.quantity > 0 ? item.quantity : 1;
+    const match = resolveProductMatch(allProds, cleanName);
+
+    if (match.bestMatch) {
+      const p = match.bestMatch;
+      processedItems.push({
+        productId: p.id,
+        productName: p.name,
+        quantity: qty,
+        currentStock: Number(p.current_stock) || 0,
+        isNewItem: false,
+      });
+    } else {
+      // Brand new item not in catalog yet (e.g. "CRM", new trend)
+      processedItems.push({
+        productId: undefined,
+        productName: cleanName,
+        quantity: qty,
+        currentStock: 0,
+        isNewItem: true,
+      });
+    }
+  }
+
+  const shareText = buildWhatsAppRestockMessageText({
+    shopName: shopData?.name || "My Store",
+    items: processedItems,
+    distributorName: params.distributorName,
+    notes: params.notes,
+  });
+
+  const rawPhone = (shopData?.whatsapp_number || "").replace(/\D/g, "");
+  let whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+  if (rawPhone.length >= 10) {
+    const formattedPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(shareText)}`;
+  }
+
+  const totalUnits = processedItems.reduce((s, it) => s + it.quantity, 0);
+  const itemsSummaryMarkdown = processedItems
+    .map(
+      (it) =>
+        `• **${it.quantity}x ${it.productName}** ${
+          it.isNewItem ? "(✨ Naya item)" : `(Current stock: ${it.currentStock} units)`
+        }`
+    )
+    .join("\n");
+
+  const distributorText = params.distributorName ? `\n• Supplier: **${params.distributorName}**` : "";
+  const noteText = params.notes ? `\n• Note: **${params.notes}**` : "";
+
+  const content = `📦 **Restock Order Drafted (${processedItems.length} items, ${totalUnits} units)**:\n${itemsSummaryMarkdown}${distributorText}${noteText}\n\nNiche confirmation card se **WhatsApp par share** karein ya order save karein.`;
+
+  const pendingAction: AssistantPendingAction = {
+    actionType: "create_restock_order",
+    productName: `${processedItems.length} items (${processedItems.map((i) => i.productName).slice(0, 2).join(", ")})`,
+    orderItems: processedItems,
+    distributorName: params.distributorName,
+    notes: params.notes,
+    shareText,
+    whatsappUrl,
+    reason: params.notes || "restock_order_draft",
+  };
+
+  return {
+    content,
+    taskType: "create_restock_order",
+    structuredData: {
+      items: processedItems,
+      totalUnits,
+      shareText,
+      whatsappUrl,
+      distributorName: params.distributorName,
+      notes: params.notes,
+    },
+    pendingAction,
   };
 }
 
@@ -1531,15 +1956,131 @@ export function parseMultiItemSaleText(text: string): AssistantSaleLineItem[] | 
 }
 
 // -------------------------------------------------------------
+// Helper: Parse restock order items from conversational text
+// Examples: "Add 10 units of serum and Nivea cream to my slip", "Order 10 serum and 5 nivea", "add CRM to order"
+// -------------------------------------------------------------
+export function parseRestockOrderItems(text: string): Array<{ productName: string; quantity: number }> | null {
+  const clean = text.trim();
+  const lower = clean.toLowerCase();
+
+  if (
+    lower.includes("cancel") ||
+    lower.includes("waiting") ||
+    lower.includes("pending") ||
+    lower.includes("delivered") ||
+    lower.includes("arrived") ||
+    lower.includes("status") ||
+    lower.includes("summary")
+  ) {
+    return null;
+  }
+
+  // Remove prefixes like "add", "order", "draft", "to my slip", "to restock slip"
+  let stripped = clean
+    .replace(/^(?:please\s+)?(?:draft\s+)?(?:restock\s+slip\s+banao\s+|restock\s+order\s+banao\s+|create\s+restock\s+order\s+|order\s+|add\s+|restock\s+)/i, "")
+    .replace(/(?:\s+(?:to\s+(?:my\s+)?(?:order\s+|restock\s+)?slip|to\s+restock|in\s+restock|mangwa\s+lo|order\s+kar\s+do|order\s+karo))+$/i, "")
+    .trim();
+
+  const segments = stripped.split(/,\s*(?:and\s+|aur\s+)?|\s+and\s+|\s+aur\s+|[+&]/i);
+  const items: Array<{ productName: string; quantity: number }> = [];
+
+  const wordNumbers: Record<string, number> = {
+    one: 1, ek: 1, two: 2, do: 2, three: 3, teen: 3, four: 4, char: 4, five: 5, panch: 5,
+    six: 6, chheh: 6, seven: 7, saat: 7, eight: 8, aath: 8, nine: 9, nau: 9, ten: 10, das: 10,
+  };
+
+  let defaultQty = 10;
+
+  for (let i = 0; i < segments.length; i++) {
+    let seg = segments[i].trim();
+    if (!seg) continue;
+
+    let qty: number | null = null;
+    const numMatch = seg.match(/^(\d+)\s*(?:x|\*|\-|\:|\s+units?|\s+pcs?|\s+pieces?)?\s+(?:of\s+)?(.+)/i);
+    const wordMatch = seg.match(/^(one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|panch|chheh|saat|aath|nau|das)\s+(?:units?\s+of\s+|pcs?\s+of\s+)?(.+)/i);
+
+    if (numMatch) {
+      qty = parseInt(numMatch[1], 10);
+      seg = numMatch[2].trim();
+      defaultQty = qty;
+    } else if (wordMatch) {
+      qty = wordNumbers[wordMatch[1].toLowerCase()] || 10;
+      seg = wordMatch[2].trim();
+      defaultQty = qty;
+    } else {
+      const trailingMatch = seg.match(/^(.+?)\s+(\d+)\s*(?:pcs?|units?|pieces?)?$/i);
+      if (trailingMatch) {
+        seg = trailingMatch[1].trim();
+        qty = parseInt(trailingMatch[2], 10);
+      } else {
+        qty = defaultQty;
+      }
+    }
+
+    seg = seg
+      .replace(/^(?:units?\s+of\s+|pieces?\s+of\s+|of\s+)/i, "")
+      .replace(/\s+(?:items?|units?|pieces?|piece|packets?)$/i, "")
+      .trim();
+
+    if (seg.length > 0) {
+      items.push({
+        productName: seg,
+        quantity: qty || defaultQty,
+      });
+    }
+  }
+
+  return items.length > 0 ? items : null;
+}
+
+// -------------------------------------------------------------
 // Fast Local Intent Matcher (0 Tokens, Zero-Latency Fallback)
 // -------------------------------------------------------------
-export function matchLocalIntent(query: string) {
+export function matchLocalIntent(query: string, lastFocusedProduct?: string) {
   const q = query.toLowerCase().trim();
 
-  // 1. Delete Product: "delete product lakme", "lakme ko delete kar do", "delete lakme"
+  const resolveTarget = (item: string) => {
+    const clean = item.trim();
+    const isPronoun = [
+      "this product",
+      "is product",
+      "ye product",
+      "this",
+      "it",
+      "its",
+      "this item",
+      "the product",
+      "product",
+      "item",
+      "isko",
+      "iska",
+      "iski",
+      "use",
+      "uska",
+      "uski",
+    ].includes(clean.toLowerCase());
+
+    if (isPronoun && lastFocusedProduct && lastFocusedProduct.trim()) {
+      return lastFocusedProduct.trim();
+    }
+    return clean;
+  };
+
+  // 0. Daily Reminders Intent: "what's today's reminder", "what are my today's reminders", "reminders", "aaj ke reminder"
+  if (
+    q.includes("reminder") ||
+    q.includes("reminders") ||
+    q.includes("aaj ke reminder") ||
+    q.includes("kya reminder") ||
+    q.includes("remind me")
+  ) {
+    return { intent: "daily_reminders" };
+  }
+
+  // 1. Delete Product: "delete product lakme", "lakme ko delete kar do", "delete this product"
   const delMatch1 = q.match(/(?:delete|remove) (?:product |item )?(.+?)(?: ko delete kar do| delete karo| hata do)?$/i);
   if (q.startsWith("delete ") || q.startsWith("remove ") || q.includes(" ko delete kar do") || q.includes(" delete karo")) {
-    const item = q
+    const rawItem = q
       .replace(/^delete (?:product |item )?/i, "")
       .replace(/^remove (?:product |item )?/i, "")
       .replace(/ ko delete kar do/i, "")
@@ -1547,8 +2088,32 @@ export function matchLocalIntent(query: string) {
       .replace(/ hata do/i, "")
       .replace(/\?/g, "")
       .trim();
+    const item = resolveTarget(rawItem);
     if (item && !item.includes("order")) {
       return { intent: "delete_product", target: item };
+    }
+  }
+
+  // 1b. Draft Restock Order Intent: "add 10 units of serum and nivea cream to my slip", "order 10 serum and nivea"
+  // 1b. Draft Restock Order Intent: "add 10 units of serum and nivea cream to my slip", "order 10 serum and nivea"
+  const isRestockOrderDraft =
+    (q.includes("order") || q.includes("restock") || q.includes("mangwa") || q.includes("mangwana") || (q.includes("slip") && (q.includes("add") || q.includes("units") || q.includes("banao")) && !q.includes("sale") && !q.includes("sold") && !q.includes("bech"))) &&
+    (q.includes("add") || q.includes("draft") || q.includes("banao") || q.includes("karo") || q.includes("kar do") || q.includes("units") || q.includes("slip") || q.includes("order") || /\d+/.test(q)) &&
+    !q.includes("cancel") &&
+    !q.includes("waiting") &&
+    !q.includes("pending") &&
+    !q.includes("delivered") &&
+    !q.includes("arrived") &&
+    !q.includes("status") &&
+    !q.includes("summary");
+
+  if (isRestockOrderDraft) {
+    const parsedOrderItems = parseRestockOrderItems(query);
+    if (parsedOrderItems && parsedOrderItems.length > 0) {
+      return {
+        intent: "create_restock_order",
+        items: parsedOrderItems,
+      };
     }
   }
 
@@ -1559,7 +2124,6 @@ export function matchLocalIntent(query: string) {
   }
 
   // Guard against treating multi-item sentences as a single product:
-  // If query contains comma or "and"/"aur" and mentions multiple items/quantities, do NOT match single-item regex!
   const hasMultipleItemsPattern =
     /[,\+]|\band\b|\baur\b/.test(q) &&
     (q.match(/\d+|one|two|three|four|five|ek|do|teen|char|panch/gi) || []).length >= 2;
@@ -1569,21 +2133,24 @@ export function matchLocalIntent(query: string) {
     const saleMatch1 = q.match(/(?:today )?(?:i )?sold (\d+) (?:units |packets |pieces |items )?(?:of )?(.+?)(?: at | for | @ | me | mein )?(?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)?$/i);
     if (saleMatch1) {
       const qty = parseInt(saleMatch1[1], 10);
-      const prod = saleMatch1[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim();
+      const prod = resolveTarget(saleMatch1[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim());
       const price = saleMatch1[3] ? parseFloat(saleMatch1[3]) : undefined;
       return { intent: "record_sale", quantity: qty, target: prod, unitPrice: price };
     }
 
-    const saleMatch2 = q.match(/(\d+) (.+?) (?:beche|becha|sell kiya|sale kiya)/i);
-    if (saleMatch2) {
-      const qty = parseInt(saleMatch2[1], 10);
-      const prod = saleMatch2[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim();
-      return { intent: "record_sale", quantity: qty, target: prod };
+    const isQuestion = q.includes("kya ") || q.includes("what ") || q.includes("which ") || q.includes("kitna ") || q.includes("how much ") || /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(q);
+    if (!isQuestion) {
+      const saleMatch2 = q.match(/(\d+) (.+?) (?:beche|becha|sell kiya|sale kiya)/i);
+      if (saleMatch2) {
+        const qty = parseInt(saleMatch2[1], 10);
+        const prod = resolveTarget(saleMatch2[2].replace(/ items?| units?| packets?| pieces?/gi, "").trim());
+        return { intent: "record_sale", quantity: qty, target: prod };
+      }
     }
 
     // 2c. Hindi / Hinglish sales: "maine abhi-abhi ... bechi hai", "use sale me add kar"
     const hindiSaleMatch = q.match(/(?:maine |mene |humne )?(?:abhi[- ]abhi )?(.+?) (?:bechi|becha|beche|bika|biki|sell kiya|sale kiya)(?: hai| tha)?/i);
-    if (hindiSaleMatch) {
+    if (hindiSaleMatch && !isQuestion) {
       let rawItem = hindiSaleMatch[1]
         .replace(/^(?:aaj |today |abhi[- ]abhi |maine |mene )+/gi, "")
         .replace(/use sale me add kar.*|use sale mein.*|sale me add kar.*|sale mein daal.*/gi, "")
@@ -1600,8 +2167,9 @@ export function matchLocalIntent(query: string) {
         unitPrice = parseFloat(priceMatch[1]);
         rawItem = rawItem.replace(/(?:for|at|rs\.?|₹|rupaye me|me|mein)\s*(\d+(?:\.\d+)?)/gi, "").trim();
       }
-      if (rawItem.length > 1) {
-        return { intent: "record_sale", quantity: qty, target: rawItem, unitPrice };
+      const prod = resolveTarget(rawItem);
+      if (prod.length > 1) {
+        return { intent: "record_sale", quantity: qty, target: prod, unitPrice };
       }
     }
 
@@ -1615,8 +2183,33 @@ export function matchLocalIntent(query: string) {
         qty = parseInt(qtyMatch[1], 10);
         rawItem = qtyMatch[2];
       }
-      return { intent: "record_sale", quantity: qty, target: rawItem };
+      return { intent: "record_sale", quantity: qty, target: resolveTarget(rawItem) };
     }
+  }
+
+  // 3a. Specific line item in past slips by price:
+  // e.g. "on 24 october what's the one item that i sold that was 30", "item sold at 30", "24 october ko 30 rupaye me kya becha tha"
+  const soldAtPrice =
+    q.match(/(?:sold|bika|becha|bechi|tha).*(?:at|for|₹|rs\.?|rupaye me|me|mein|worth|that was)\s*(?:₹|rs\.?)?\s*(\d+(?:\.\d+)?)/i) ||
+    q.match(/(?:at|for|₹|rs\.?)\s*(\d+(?:\.\d+)?).*(?:sold|bika|becha|bechi)/i) ||
+    q.match(/(\d+(?:\.\d+)?)\s*(?:rupaye|rs\.?|₹)\s*(?:me|mein|par)?.*(?:sold|bika|becha|bechi)/i) ||
+    q.match(/(?:that was|worth)\s*(?:₹|rs\.?)?\s*(\d+(?:\.\d+)?)/i);
+
+  if ((q.includes("sold") || q.includes("becha") || q.includes("bika") || q.includes("bechi")) && soldAtPrice) {
+    let datePart = "";
+    const onDateMatch =
+      q.match(/(?:on |for |tarikh )([0-9a-zA-Z\s\/\-]+)/i) ||
+      q.match(/^([0-9a-zA-Z\s\/\-]+?)(?: ko| tarikh)/i);
+
+    if (onDateMatch) {
+      datePart = onDateMatch[1].replace(/what.*|which.*|item.*|\?/gi, "").trim();
+    } else if (q.includes("yesterday") || q.includes("kal")) {
+      datePart = "yesterday";
+    } else {
+      datePart = "today";
+    }
+    const unitPrice = parseFloat(soldAtPrice[1]);
+    return { intent: "sales_history", dateQuery: datePart, unitPrice };
   }
 
   // 3. Sales History & Earnings: "on 20th january 2026 how much money did i earn", "how much money did i sell", "total sales", "today sales"
@@ -1751,7 +2344,7 @@ export function matchLocalIntent(query: string) {
     q.includes(" kahan rakha") ||
     q.includes("kidhar hai")
   ) {
-    const item = q
+    const raw = q
       .replace(/^where is /i, "")
       .replace(/^location of /i, "")
       .replace(/ kahan hai/i, "")
@@ -1760,7 +2353,7 @@ export function matchLocalIntent(query: string) {
       .replace(/ kidhar hai/i, "")
       .replace(/\?/g, "")
       .trim();
-    return { intent: "find_location", target: item };
+    return { intent: "find_location", target: resolveTarget(raw) };
   }
 
   // 6. Low stock: "what is low on stock", "low stock", "kya khatam hai"
@@ -1784,7 +2377,7 @@ export function matchLocalIntent(query: string) {
     q.includes(" kitna hai") ||
     q.includes(" kitna bacha")
   ) {
-    const item = q
+    const raw = q
       .replace(/^check stock of /i, "")
       .replace(/^stock of /i, "")
       .replace(/^how much /i, "")
@@ -1795,7 +2388,7 @@ export function matchLocalIntent(query: string) {
       .replace(/ kitna bacha/i, "")
       .replace(/\?/g, "")
       .trim();
-    return { intent: "check_stock", target: item };
+    return { intent: "check_stock", target: resolveTarget(raw) };
   }
 
   // 8. Price history: "price of colgate", "selling price of lakme", "rate of maggi"
@@ -1807,7 +2400,7 @@ export function matchLocalIntent(query: string) {
     q.includes(" ka rate") ||
     q.includes(" kitne ka hai")
   ) {
-    const item = q
+    const raw = q
       .replace(/^selling price of /i, "")
       .replace(/^price of /i, "")
       .replace(/^rate of /i, "")
@@ -1816,7 +2409,7 @@ export function matchLocalIntent(query: string) {
       .replace(/ kitne ka hai/i, "")
       .replace(/\?/g, "")
       .trim();
-    return { intent: "price_history", target: item };
+    return { intent: "price_history", target: resolveTarget(raw) };
   }
 
   // 9. Stock adjust: "add 10 to maggi", "deduct 2 lakme", "maggi mein 5 jodo"
@@ -1825,7 +2418,7 @@ export function matchLocalIntent(query: string) {
     return {
       intent: "adjust_stock",
       delta: parseInt(addMatch[1], 10),
-      target: addMatch[2].replace(/\?/g, "").trim(),
+      target: resolveTarget(addMatch[2].replace(/\?/g, "").trim()),
     };
   }
 
@@ -1834,7 +2427,7 @@ export function matchLocalIntent(query: string) {
     return {
       intent: "adjust_stock",
       delta: -parseInt(deductMatch[1], 10),
-      target: deductMatch[2].replace(/\?/g, "").trim(),
+      target: resolveTarget(deductMatch[2].replace(/\?/g, "").trim()),
     };
   }
 
@@ -1865,7 +2458,7 @@ export function matchLocalIntent(query: string) {
   if (locMatch1) {
     return {
       intent: "update_location",
-      target: locMatch1[1].trim(),
+      target: resolveTarget(locMatch1[1].trim()),
       newLocation: locMatch1[2].replace(/\?/g, "").trim(),
     };
   }
@@ -1873,7 +2466,7 @@ export function matchLocalIntent(query: string) {
   if (locMatchAdd) {
     return {
       intent: "update_location",
-      target: locMatchAdd[1].trim(),
+      target: resolveTarget(locMatchAdd[1].trim()),
       newLocation: locMatchAdd[2].replace(/\?/g, "").trim(),
     };
   }
@@ -1881,8 +2474,17 @@ export function matchLocalIntent(query: string) {
   if (locMatch2) {
     return {
       intent: "update_location",
-      target: locMatch2[1].trim(),
+      target: resolveTarget(locMatch2[1].trim()),
       newLocation: locMatch2[2].replace(/\?/g, "").trim(),
+    };
+  }
+
+  const locMatchHindiPronoun = q.match(/(?:isko|iska|ise|use|uska|is product ko|this product) (?:ko )?(.+?) (?:me|mein|par) (?:rakh do|daal do|set kar do|rakhein)/i);
+  if (locMatchHindiPronoun && lastFocusedProduct) {
+    return {
+      intent: "update_location",
+      target: lastFocusedProduct.trim(),
+      newLocation: locMatchHindiPronoun[1].replace(/\?/g, "").trim(),
     };
   }
 
@@ -1891,7 +2493,7 @@ export function matchLocalIntent(query: string) {
   if (priceMatch1) {
     return {
       intent: "update_price",
-      target: priceMatch1[1].trim(),
+      target: resolveTarget(priceMatch1[1].trim()),
       newPrice: parseFloat(priceMatch1[2]),
     };
   }
@@ -1899,7 +2501,7 @@ export function matchLocalIntent(query: string) {
   if (priceMatchAdd) {
     return {
       intent: "update_price",
-      target: priceMatchAdd[2].trim(),
+      target: resolveTarget(priceMatchAdd[2].trim()),
       newPrice: parseFloat(priceMatchAdd[1]),
     };
   }
@@ -1907,16 +2509,30 @@ export function matchLocalIntent(query: string) {
   if (priceMatchDirect) {
     return {
       intent: "update_price",
-      target: priceMatchDirect[1].trim(),
+      target: resolveTarget(priceMatchDirect[1].trim()),
       newPrice: parseFloat(priceMatchDirect[2]),
     };
   }
-  const priceMatch2 = q.match(/(.+) (?:ka|ki) (?:price|rate) (?:rs\.?|₹)?\s*(\d+(?:\.\d+)?) (?:kar do|rakh do|karo)/i);
+  const priceMatch2 = q.match(/(.+) (?:ka|ki) (?:price|rate) (?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)/i);
   if (priceMatch2) {
     return {
       intent: "update_price",
-      target: priceMatch2[1].trim(),
+      target: resolveTarget(priceMatch2[1].trim()),
       newPrice: parseFloat(priceMatch2[2]),
+    };
+  }
+
+  // 14. Contextual Price Updates without product specified: "update this product's price as well to 50", "change its price to 50", "price 50 kar do"
+  const implicitPriceMatch =
+    q.match(/(?:update|change|set|add) (?:this product'?s? |its )?price (?:as well )?(?:to|as) (?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)/i) ||
+    q.match(/(?:iska|iski) price (?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)(?: kar do| rakh do| karo)?/i) ||
+    q.match(/^price (?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)(?: kar do)?$/i);
+
+  if (implicitPriceMatch && lastFocusedProduct && lastFocusedProduct.trim()) {
+    return {
+      intent: "update_price",
+      target: lastFocusedProduct.trim(),
+      newPrice: parseFloat(implicitPriceMatch[1]),
     };
   }
 
