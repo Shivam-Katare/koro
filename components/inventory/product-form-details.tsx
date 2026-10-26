@@ -26,32 +26,38 @@ export function ProductFormDetails({
   disabled,
 }: ProductFormDetailsProps) {
   return (
-    <div className="space-y-3 pt-1 border-t border-border/60">
+    <div className="space-y-4 pt-3 border-t border-border/70">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Pricing &amp; Storage Details (Optional)
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label htmlFor="prod-price" className="text-xs font-medium text-foreground">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
+          <Label htmlFor="prod-price" className="text-sm font-medium text-foreground">
             Selling Price (₹)
           </Label>
-          <Input
-            id="prod-price"
-            type="number"
-            min="0"
-            step="0.5"
-            placeholder="0.00"
-            value={sellingPrice}
-            onChange={(e) => onChange({ sellingPrice: e.target.value })}
-            disabled={disabled}
-          />
+          <div className="relative">
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+              ₹
+            </span>
+            <Input
+              id="prod-price"
+              type="number"
+              min="0"
+              step="0.5"
+              placeholder="0.00"
+              value={sellingPrice}
+              onChange={(e) => onChange({ sellingPrice: e.target.value })}
+              disabled={disabled}
+              className="h-11 rounded-xl pl-8 text-sm font-semibold bg-muted/20 border-border focus:bg-background transition-colors"
+            />
+          </div>
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="prod-location" className="text-xs font-medium text-foreground">
+        <div className="space-y-1.5">
+          <Label htmlFor="prod-location" className="text-sm font-medium text-foreground">
             Storage Location
           </Label>
           <Input
@@ -60,17 +66,18 @@ export function ProductFormDetails({
             value={storageLocation}
             onChange={(e) => onChange({ storageLocation: e.target.value })}
             disabled={disabled}
+            className="h-11 rounded-xl text-sm px-3.5 bg-muted/20 border-border focus:bg-background transition-colors"
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <Label htmlFor="prod-threshold" className="text-xs font-medium text-foreground">
+            <Label htmlFor="prod-threshold" className="text-sm font-medium text-foreground">
               Low Stock Alert Limit
             </Label>
-            <span className="text-[10px] text-muted-foreground">Default: 5</span>
+            <span className="text-xs text-muted-foreground">Default: 5</span>
           </div>
           <Input
             id="prod-threshold"
@@ -81,11 +88,12 @@ export function ProductFormDetails({
             value={minStockThreshold}
             onChange={(e) => onChange({ minStockThreshold: e.target.value })}
             disabled={disabled}
+            className="h-11 rounded-xl text-sm bg-muted/20 border-border focus:bg-background transition-colors"
           />
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="prod-barcode" className="text-xs font-medium text-foreground">
+        <div className="space-y-1.5">
+          <Label htmlFor="prod-barcode" className="text-sm font-medium text-foreground">
             Barcode / Item Code
           </Label>
           <Input
@@ -94,6 +102,7 @@ export function ProductFormDetails({
             value={barcode}
             onChange={(e) => onChange({ barcode: e.target.value })}
             disabled={disabled}
+            className="h-11 rounded-xl text-sm bg-muted/20 border-border focus:bg-background transition-colors"
           />
         </div>
       </div>

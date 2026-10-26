@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { Store, ShieldCheck, Sparkles } from "lucide-react";
+import { ShieldCheck, Sparkles } from "lucide-react";
 import { OnboardingForm } from "@/components/auth/onboarding-form";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { KoroWordmark } from "@/components/brand/koro-wordmark";
 import type { Profile } from "@/lib/supabase/types";
 
 export const instant = false;
@@ -45,40 +45,45 @@ export default async function OnboardingPage() {
     "Shop Owner";
 
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center px-4 py-12 bg-background">
-      <div className="w-full max-w-lg space-y-6">
-        {/* Brand Header */}
+    <div className="min-h-screen flex flex-col justify-center items-center px-4 py-8 sm:py-12 bg-background relative overflow-hidden">
+      {/* Ambient decorative glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[500px] rounded-full bg-primary/10 blur-3xl opacity-50"
+      />
+
+      <div className="w-full max-w-xl space-y-6 relative z-10">
+        {/* Brand Header - Multi-colored Koro only, no logo */}
         <div className="flex flex-col items-center text-center space-y-2">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-md">
-            <Store className="h-6 w-6" />
-          </div>
+          <KoroWordmark size="xl" />
           <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground">
-            Welcome to Zibbi, {displayName}!
+            Welcome to Koro, {displayName}!
           </h1>
-          <p className="text-xs text-muted-foreground max-w-sm">
-            Complete your shop details to start managing stock and preparing restock lists.
+          <p className="text-xs sm:text-sm text-muted-foreground max-w-sm">
+            Complete your shop profile to start managing stock, sales slips, and inventory.
           </p>
         </div>
 
         {/* Setup Card */}
-        <Card className="border-border shadow-lg">
-          <CardHeader className="space-y-1 text-center pb-4">
-            <div className="inline-flex items-center gap-1.5 mx-auto rounded-full bg-primary/10 border border-primary/20 px-3 py-0.5 text-xs font-semibold text-primary mb-1">
-              <Sparkles className="h-3 w-3" />
+        <div className="rounded-3xl border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-5">
+          <div className="space-y-1 text-center pb-1">
+            <div className="inline-flex items-center gap-1.5 mx-auto rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-semibold text-primary mb-2">
+              <Sparkles className="h-3.5 w-3.5" />
               Final Step: Store Setup
             </div>
-            <CardTitle className="text-xl font-bold">Register Your Store</CardTitle>
-            <CardDescription className="text-xs">
+            <h2 className="text-2xl font-bold font-heading text-foreground">
+              Register Your Store
+            </h2>
+            <p className="text-xs sm:text-sm text-muted-foreground">
               Enter your store name and select a category. Phone number is optional.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <OnboardingForm initialFullName={displayName} initialEmail={user.email} />
-          </CardContent>
-        </Card>
+            </p>
+          </div>
 
-        <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+          <OnboardingForm initialFullName={displayName} initialEmail={user.email} />
+        </div>
+
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-border/70 bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">
+          <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
           <span>Private Tenant • RLS Protected Data</span>
         </div>
       </div>

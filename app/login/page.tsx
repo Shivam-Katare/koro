@@ -1,70 +1,72 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { Store, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { LoginForm } from "@/components/auth/login-form";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { KoroWordmark } from "@/components/brand/koro-wordmark";
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center px-4 py-12 bg-background">
-      <div className="w-full max-w-md space-y-6">
-        {/* Brand header */}
+    <div className="min-h-screen flex flex-col justify-center items-center px-4 py-8 sm:py-12 bg-background relative overflow-hidden">
+      {/* Ambient decorative glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[500px] rounded-full bg-primary/10 blur-3xl opacity-50"
+      />
+
+      <div className="w-full max-w-md space-y-6 relative z-10">
+        {/* Brand header - No logo, multi-colored Koro only */}
         <div className="flex flex-col items-center text-center space-y-2">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <Store className="h-5 w-5" />
-            </div>
-            <span className="font-heading text-2xl font-bold tracking-tight text-foreground">
-              Zibbi
-            </span>
+          <Link href="/" className="inline-flex transition-transform hover:scale-105">
+            <KoroWordmark size="xl" />
           </Link>
-          <p className="text-xs text-muted-foreground">
-            Retail Operations Assistant for Local Shopkeepers
+          <p className="text-xs sm:text-sm text-muted-foreground max-w-xs">
+            Sign in to manage stock, sales slips, and store operations
           </p>
         </div>
 
         {/* Login Card */}
-        <Card className="border-border shadow-lg">
-          <CardHeader className="space-y-1 text-center pb-4">
-            <CardTitle className="text-xl font-bold">Sign In to Your Shop</CardTitle>
-            <CardDescription className="text-xs">
-              Enter your credentials to manage stock, search inventory, and review slips.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <GoogleAuthButton label="Sign in with Google" />
+        <div className="rounded-3xl border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-5">
+          <div className="space-y-1 text-center pb-1">
+            <h1 className="text-2xl sm:text-3xl font-bold font-heading text-foreground">
+              Sign In to Your Shop
+            </h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">
+              Enter your credentials to access your Koro dashboard.
+            </p>
+          </div>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">
-                  Or with email
-                </span>
-              </div>
+          <GoogleAuthButton label="Sign in with Google" />
+
+          <div className="relative py-1">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border/70" />
             </div>
-
-            <Suspense fallback={<div className="h-32 rounded-lg bg-muted/40 animate-pulse" />}>
-              <LoginForm />
-            </Suspense>
-
-            <div className="pt-2 text-center text-xs text-muted-foreground border-t border-border">
-              Don&apos;t have a shop account yet?{" "}
-              <Link
-                href="/signup"
-                className="font-semibold text-primary underline underline-offset-4 hover:opacity-90"
-              >
-                Register your shop
-              </Link>
+            <div className="relative flex justify-center text-xs uppercase tracking-wider font-semibold">
+              <span className="bg-card px-3 text-muted-foreground">
+                Or with email
+              </span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+
+          <Suspense fallback={<div className="h-32 rounded-2xl bg-muted/30 animate-pulse" />}>
+            <LoginForm />
+          </Suspense>
+
+          <div className="pt-3 text-center text-sm text-muted-foreground border-t border-border/70">
+            Don&apos;t have a shop account yet?{" "}
+            <Link
+              href="/signup"
+              className="font-semibold text-primary underline underline-offset-4 hover:opacity-90 ml-1"
+            >
+              Register your shop
+            </Link>
+          </div>
+        </div>
 
         {/* Trust badge */}
-        <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-border/70 bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">
+          <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
           <span>RLS Isolated Data • Strict Shop Security</span>
         </div>
       </div>

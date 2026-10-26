@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/lib/store/use-auth-store";
 import { onboardingSchema, SHOP_CATEGORIES, type OnboardingInput } from "@/lib/validations/auth";
 import { createShopAction } from "@/app/onboarding/actions";
-import { Loader2, Store } from "lucide-react";
+import { Loader2, ArrowRight } from "lucide-react";
 import toast from "react-hot-toast";
+import { cn } from "@/lib/utils";
 
 interface OnboardingFormProps {
   initialFullName?: string;
@@ -95,24 +96,30 @@ export function OnboardingForm({ initialFullName, initialEmail }: OnboardingForm
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-1">
-        <Label htmlFor="onboard-owner">Owner Full Name</Label>
+      <div className="space-y-1.5">
+        <Label htmlFor="onboard-owner" className="text-sm font-semibold text-foreground">
+          Owner Full Name
+        </Label>
         <Input
           id="onboard-owner"
           placeholder="e.g. Ramesh Kumar"
           value={formData.fullName}
           onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
           disabled={submitting}
+          className={cn(
+            "h-12 rounded-2xl text-sm sm:text-base px-4 bg-muted/20 border-border focus:bg-background transition-colors",
+            errors.fullName && "border-destructive focus-visible:ring-destructive"
+          )}
         />
-        {errors.fullName && <p className="text-xs text-destructive">{errors.fullName}</p>}
+        {errors.fullName && <p className="text-xs text-destructive font-medium">{errors.fullName}</p>}
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label htmlFor="onboard-shop" className="font-semibold text-foreground">
+          <Label htmlFor="onboard-shop" className="text-sm font-semibold text-foreground">
             Shop Name <span className="text-destructive">*</span>
           </Label>
-          <span className="text-[11px] text-muted-foreground">Required</span>
+          <span className="text-xs text-muted-foreground">Required</span>
         </div>
         <Input
           id="onboard-shop"
@@ -120,20 +127,24 @@ export function OnboardingForm({ initialFullName, initialEmail }: OnboardingForm
           value={formData.shopName}
           onChange={(e) => setFormData({ ...formData, shopName: e.target.value })}
           disabled={submitting}
+          className={cn(
+            "h-12 rounded-2xl text-sm sm:text-base px-4 bg-muted/20 border-border focus:bg-background transition-colors",
+            errors.shopName && "border-destructive focus-visible:ring-destructive"
+          )}
         />
-        {errors.shopName && <p className="text-xs text-destructive">{errors.shopName}</p>}
+        {errors.shopName && <p className="text-xs text-destructive font-medium">{errors.shopName}</p>}
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label htmlFor="onboard-category" className="font-semibold text-foreground">
+          <Label htmlFor="onboard-category" className="text-sm font-semibold text-foreground">
             Shop Category <span className="text-destructive">*</span>
           </Label>
-          <span className="text-[11px] text-muted-foreground">Required</span>
+          <span className="text-xs text-muted-foreground">Required</span>
         </div>
         <select
           id="onboard-category"
-          className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+          className="flex h-12 w-full rounded-2xl border border-border bg-muted/20 px-4 text-sm font-medium text-foreground shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus:bg-background"
           value={formData.category}
           onChange={(e) => setFormData({ ...formData, category: e.target.value })}
           disabled={submitting}
@@ -144,15 +155,15 @@ export function OnboardingForm({ initialFullName, initialEmail }: OnboardingForm
             </option>
           ))}
         </select>
-        {errors.category && <p className="text-xs text-destructive">{errors.category}</p>}
+        {errors.category && <p className="text-xs text-destructive font-medium">{errors.category}</p>}
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label htmlFor="onboard-phone">
+          <Label htmlFor="onboard-phone" className="text-sm font-medium text-foreground">
             WhatsApp / Phone Number <span className="text-muted-foreground text-xs font-normal">(Optional)</span>
           </Label>
-          <span className="text-[11px] text-muted-foreground">For restock reports</span>
+          <span className="text-xs text-muted-foreground">For restock reports</span>
         </div>
         <Input
           id="onboard-phone"
@@ -160,25 +171,32 @@ export function OnboardingForm({ initialFullName, initialEmail }: OnboardingForm
           value={formData.whatsappNumber}
           onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
           disabled={submitting}
+          className="h-12 rounded-2xl text-sm sm:text-base px-4 bg-muted/20 border-border focus:bg-background transition-colors"
         />
         {errors.whatsappNumber && (
-          <p className="text-xs text-destructive">{errors.whatsappNumber}</p>
+          <p className="text-xs text-destructive font-medium">{errors.whatsappNumber}</p>
         )}
       </div>
 
-      <Button type="submit" className="w-full h-11 font-semibold gap-2 mt-2" disabled={submitting}>
-        {submitting ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Setting Up Shop...</span>
-          </>
-        ) : (
-          <>
-            <Store className="h-4 w-4" />
-            <span>Complete Setup &amp; Open Dashboard</span>
-          </>
-        )}
-      </Button>
+      <div className="pt-2">
+        <Button
+          type="submit"
+          className="w-full h-12 rounded-full font-bold text-base bg-primary text-primary-foreground hover:bg-primary/90 shadow-md gap-2 cursor-pointer transition-all"
+          disabled={submitting}
+        >
+          {submitting ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span>Setting Up Shop...</span>
+            </>
+          ) : (
+            <>
+              <span>Complete Setup &amp; Open Dashboard</span>
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </Button>
+      </div>
     </form>
   );
 }

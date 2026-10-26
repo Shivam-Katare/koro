@@ -55,30 +55,30 @@ export function ProductFormAttributes({
   };
 
   return (
-    <div className="space-y-3 pt-1 border-t border-border/60">
+    <div className="space-y-3 pt-3 border-t border-border/70">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3 text-primary" />
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
           Category Attributes ({category})
         </span>
         <Button
           type="button"
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="h-6 text-[11px] gap-1 px-2 text-primary hover:text-primary"
+          className="h-7 text-xs gap-1 px-2.5 rounded-full text-primary hover:text-primary hover:bg-primary/10 border-primary/20"
           onClick={() => setShowCustomAdder(!showCustomAdder)}
           disabled={disabled}
         >
-          <Plus className="h-3 w-3" />
+          <Plus className="h-3.5 w-3.5" />
           <span>Add Custom Field</span>
         </Button>
       </div>
 
       {/* Preset dynamic fields */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {presets.map((preset) => (
-          <div key={preset.key} className="space-y-1">
-            <Label htmlFor={`attr-${preset.key}`} className="text-xs font-medium text-foreground">
+          <div key={preset.key} className="space-y-1.5">
+            <Label htmlFor={`attr-${preset.key}`} className="text-sm font-medium text-foreground">
               {preset.label}
             </Label>
             <Input
@@ -87,6 +87,7 @@ export function ProductFormAttributes({
               value={attributes[preset.key] || ""}
               onChange={(e) => handleAttrChange(preset.key, e.target.value)}
               disabled={disabled}
+              className="h-10 rounded-xl text-sm bg-background border-border"
             />
           </div>
         ))}
@@ -95,23 +96,23 @@ export function ProductFormAttributes({
       {/* Custom attributes added by user */}
       {Object.entries(attributes).some(([k]) => !presets.some((p) => p.key === k)) && (
         <div className="space-y-2 pt-1">
-          <span className="text-[11px] text-muted-foreground font-medium">Extra Custom Tags:</span>
-          <div className="flex flex-wrap gap-1.5">
+          <span className="text-xs text-muted-foreground font-medium">Extra Custom Tags:</span>
+          <div className="flex flex-wrap gap-2">
             {Object.entries(attributes)
               .filter(([k]) => !presets.some((p) => p.key === k))
               .map(([k, v]) => (
                 <div
                   key={k}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs"
+                  className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 text-xs shadow-2xs"
                 >
                   <span className="font-semibold text-foreground capitalize">{k.replace(/_/g, " ")}:</span>
                   <span className="text-muted-foreground">{String(v)}</span>
                   <button
                     type="button"
                     onClick={() => handleRemove(k)}
-                    className="text-muted-foreground hover:text-destructive transition-colors ml-1"
+                    className="text-muted-foreground hover:text-destructive transition-colors ml-0.5 cursor-pointer"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ))}
@@ -121,24 +122,24 @@ export function ProductFormAttributes({
 
       {/* Custom attribute adder inline modal */}
       {showCustomAdder && (
-        <div className="flex flex-col sm:flex-row items-center gap-2 p-2.5 rounded-xl border border-primary/20 bg-primary/5">
+        <div className="flex flex-col sm:flex-row items-center gap-2 p-3 rounded-2xl border border-primary/30 bg-primary/5">
           <Input
             placeholder="Field name (e.g. Color, Shade, Box)"
             value={customKey}
             onChange={(e) => setCustomKey(e.target.value)}
-            className="text-xs h-8"
+            className="text-xs h-9 rounded-xl bg-background"
           />
           <Input
             placeholder="Value (e.g. Golden, Box-4)"
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
-            className="text-xs h-8"
+            className="text-xs h-9 rounded-xl bg-background"
           />
           <Button
             type="button"
             size="sm"
             onClick={handleAddCustom}
-            className="h-8 text-xs shrink-0"
+            className="h-9 text-xs rounded-xl px-4 shrink-0 font-semibold"
             disabled={!customKey.trim() || !customValue.trim()}
           >
             Save Tag
