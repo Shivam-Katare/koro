@@ -82,16 +82,17 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const { shopId, query, conversationId } = parseResult.data;
+  const isDemo = shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+
+  if (!user && !isDemo) {
     return { success: false, error: "Please sign in to talk to your assistant" };
   }
-
-  const { shopId, query, conversationId } = parseResult.data;
 
   // 1. Record user message in Supabase
   await (supabase.from("assistant_messages") as any).insert({
     shop_id: shopId,
-    user_id: user.id,
+    user_id: user?.id || null,
     role: "user",
     content: query,
     task_type: "general",
@@ -250,7 +251,7 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
       // Save assistant response to DB
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: user?.id || null,
         role: "assistant",
         content: resultPayload.content,
         task_type: resultPayload.taskType,
@@ -276,13 +277,13 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
           functionDeclarations: [
             {
               name: "find_product_location",
-              description: "Find a product and its physical shelf/drawer storage location in the shop",
+              description: "Find a product and its physical shelf/drawer storage location in the shop. Works with brand, item name, categories, varieties, and Indian colloquial terms (e.g. Kaveri Mehndi, chudi, earrings, kangan, bangles, pearl drop, bindi).",
               parameters: {
                 type: Type.OBJECT,
                 properties: {
                   productName: {
                     type: Type.STRING,
-                    description: "The name or keyword of the product (e.g. Lakme, Tata Tea)",
+                    description: "The name, brand, variety, or Indian colloquial term of the product (e.g. Kaveri Mehndi, chudi, earrings, kangan, bangles, pearl drop, eyeliner)",
                   },
                 },
                 required: ["productName"],
@@ -290,13 +291,13 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
             },
             {
               name: "check_product_stock",
-              description: "Check the current stock quantity and status of a product",
+              description: "Check the current stock quantity and status of a product or category varieties.",
               parameters: {
                 type: Type.OBJECT,
                 properties: {
                   productName: {
                     type: Type.STRING,
-                    description: "The name or keyword of the product",
+                    description: "The name, brand, variety, or Indian colloquial term of the product (e.g. Kaveri Mehndi, chudi, earrings, kangan, bangles, pearl drop)",
                   },
                 },
                 required: ["productName"],
@@ -615,12 +616,12 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
           .select("name, category, description, created_at, owner_id, whatsapp_number")
           .eq("id", shopId)
           .maybeSingle(),
-        user.id
+        user?.id
           ? (supabase.from("profiles") as any)
               .select("full_name, email")
               .eq("id", user.id)
               .maybeSingle()
-          : Promise.resolve({ data: null }),
+          : Promise.resolve({ data: { full_name: "Shivam (Demo)", email: "demo@koro.retail" } }),
         (supabase.from("products") as any)
           .select("id", { count: "exact", head: true })
           .eq("shop_id", shopId),
@@ -678,7 +679,21 @@ Rules:
 14. If user says an order or restock arrived, call propose_record_order_arrival.
 15. If user asks to delete a product (e.g. "Delete product Lakme"), call propose_delete_product. Never delete without confirmation.
 16. Conversational Memory: If the user just updated or discussed a product (e.g. updated location of Lakme) and then says "update this product's price as well" or "price 50 kar do", remember that "this product" refers to the focused product without asking "which product".
-17. Support English, Hindi, and Hinglish. Keep your final answer short and clear.`;
+17. Support English, Hindi, and Hinglish. Keep your final answer short and clear.
+18. Multilingual Semantic Equivalence & Indian Retail Vocabulary (CRITICAL):
+    - Real Indian shopkeepers speak with diverse regional vocabulary, colloquial terms, and Hindi/Hinglish phrasing. NEVER rely on exact catalog spelling or US English words!
+    - Understand semantic intent and equivalence:
+      * 'Mehndi' / 'Mehendi' / 'Mendi' / 'Henna' / 'Cone' -> all refer to mehndi products (e.g. Kaveri Natural Herbal Mehendi Cone).
+      * 'Chudi' / 'Choodi' / 'Chudiyan' / 'Kangan' / 'Kada' / 'Bangles' -> all refer to bangles and wrist jewelry.
+      * 'Earrings' / 'Jhumka' / 'Jhumki' / 'Chandbali' / 'Tops' / 'Pearl drop' -> all refer to earrings and ear jewelry.
+      * 'Bindi' / 'Bindiya' / 'Tikli' -> bindi cards and booklets.
+      * 'Kajal' / 'Kaajal' / 'Surma' / 'Eyeliner' -> eye makeup.
+      * 'Hairband' / 'Rubber band' / 'Scrunchie' / 'Clutcher' / 'Clips' / 'Hairpins' -> hair accessories.
+      * 'Cream' / 'Moisturizer' / 'Cold cream' -> face and body creams.
+      * 'Nail polish' / 'Nail paint' / 'Nail pops' -> nail cosmetics.
+      * 'Sindoor' / 'Sindur' / 'Kumkum' -> traditional sindoor.
+    - When searching or looking up an item, call find_product_location or check_product_stock with the essential keyword(s) (e.g. 'Mehndi', 'Earrings', 'Chudi', 'Kangan', 'Pearl drop', 'Kaveri').
+    - When multiple products match (for example, multiple chudis, kangans, or earrings), provide a clear, helpful breakdown of the available varieties and their storage locations.`;
 
       const response = await ai.models.generateContent({
         model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
@@ -814,7 +829,7 @@ Rules:
 
           await (supabase.from("assistant_messages") as any).insert({
             shop_id: shopId,
-            user_id: user.id,
+            user_id: user?.id || null,
             role: "assistant",
             content: finalPayload.content,
             task_type: finalPayload.taskType,
@@ -842,7 +857,7 @@ Rules:
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: user?.id || null,
         role: "assistant",
         content: text,
         task_type: "general",
@@ -900,9 +915,11 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const isDemo = parseResult.data.shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+  if (!user && !isDemo) {
     return { success: false, error: "Unauthorized" };
   }
+  const effectiveUserId = user?.id || null;
 
   const {
     shopId,
@@ -948,7 +965,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
       // Save confirmation record to assistant messages
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "adjust_stock",
@@ -997,7 +1014,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
         const confirmMsg = `✅ **Updated Existing Item!** **${productName}** already catalog mein tha, isliye nayi details update kar di gayi hain.`;
         await (supabase.from("assistant_messages") as any).insert({
           shop_id: shopId,
-          user_id: user.id,
+          user_id: effectiveUserId,
           role: "assistant",
           content: confirmMsg,
           task_type: "create_product",
@@ -1040,7 +1057,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
       // Save confirmation record to assistant messages
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "create_product",
@@ -1093,7 +1110,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "update_location",
@@ -1149,7 +1166,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "update_price",
@@ -1182,7 +1199,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "delete_product",
@@ -1290,7 +1307,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "record_sale",
@@ -1332,7 +1349,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "record_order_arrival",
@@ -1414,7 +1431,7 @@ export async function confirmAssistantActionExecution(input: ConfirmAssistantAct
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: confirmMsg,
         task_type: "create_restock_order",

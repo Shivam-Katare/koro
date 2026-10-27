@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Sparkles, ArrowRight } from "lucide-react";
 import { LoginForm } from "@/components/auth/login-form";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { KoroWordmark } from "@/components/brand/koro-wordmark";
@@ -35,6 +35,27 @@ export default function LoginPage() {
               Enter your credentials to access your Koro dashboard.
             </p>
           </div>
+
+          {/* Instant Demo Shop Pill */}
+          <Link
+            href="/dashboard"
+            className="group flex items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/10 p-3.5 transition-all hover:bg-primary/15 hover:border-primary/50 shadow-xs"
+          >
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="h-4 w-4 text-primary shrink-0 animate-pulse" />
+              <div className="text-left">
+                <p className="text-xs font-bold text-foreground">
+                  Testing for Hackathon?
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Slide into Pooja Demo Store without signing in
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-bold text-primary group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
+              Open Demo →
+            </span>
+          </Link>
 
           <GoogleAuthButton label="Sign in with Google" />
 

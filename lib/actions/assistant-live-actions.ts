@@ -107,21 +107,37 @@ Core Speaking Rules:
       ALWAYS call propose_delete_product. Never delete silently.
 16. Conversational Memory & Pronouns:
     - If the user just updated or discussed a product (e.g. updated location of Lakme) and immediately says "update this product's price as well", "price 50 kar do", or uses "this", "it", "iska", "use", remember that it refers to the last focused product without asking "which product".
-17. Ambiguity Resolution:
-    - If multiple matching products are found, the tools return distinct options. Ask the shopkeeper politely which specific product they meant before proceeding.`;
+17. Multiple Matching Products & Variety Queries (CRITICAL):
+    - When a user asks about an item category or generic term (e.g. "where are the earrings", "chudi kahan hai", "bangles ka stock kitna hai", "kangan kahan hai", "pearl drop"), find_product_location or check_product_stock returns the full list of available varieties and locations.
+    - NEVER say "not found" or "nahi mila" if matching varieties are returned!
+    - Naturally speak a friendly, concise summary of the varieties, mentioning their locations or stocks (e.g. "Aapke paas chudi ke 3 items hain: Velvet Maroon Drawer 2 mein hai, Multicolor Bangles Box 8 mein, aur Golden Kangan Glass Counter par rakha hai.").
+    - For modifications that need a single product (like price update or deletion), ask which specific one they'd like to update.
+18. Multilingual Semantic Equivalence & Indian Retail Vocabulary (CRITICAL):
+    - Real Indian shopkeepers speak with diverse regional vocabulary, colloquial terms, and Hindi/Hinglish phrasing. NEVER rely on exact catalog spelling or US English words!
+    - Understand semantic intent and equivalence:
+      * 'Mehndi' / 'Mehendi' / 'Mendi' / 'Henna' / 'Cone' -> all refer to mehndi products (e.g. Kaveri Natural Herbal Mehendi Cone).
+      * 'Chudi' / 'Choodi' / 'Chudiyan' / 'Kangan' / 'Kada' / 'Bangles' -> all refer to bangles and wrist jewelry.
+      * 'Earrings' / 'Jhumka' / 'Jhumki' / 'Chandbali' / 'Tops' / 'Pearl drop' -> all refer to earrings and ear jewelry.
+      * 'Bindi' / 'Bindiya' / 'Tikli' -> bindi cards and booklets.
+      * 'Kajal' / 'Kaajal' / 'Surma' / 'Eyeliner' -> eye makeup.
+      * 'Hairband' / 'Rubber band' / 'Scrunchie' / 'Clutcher' / 'Clips' / 'Hairpins' -> hair accessories.
+      * 'Cream' / 'Moisturizer' / 'Cold cream' -> face and body creams.
+      * 'Nail polish' / 'Nail paint' / 'Nail pops' -> nail cosmetics.
+      * 'Sindoor' / 'Sindur' / 'Kumkum' -> traditional sindoor.
+    - Always pass the core semantic keyword (e.g. 'Mehndi', 'Earrings', 'Chudi', 'Kangan', 'Pearl drop', 'Kaveri') when calling the location, stock, or price tools.`;
 
 const LIVE_TOOLS = [
   {
     functionDeclarations: [
       {
         name: "find_product_location",
-        description: "Find a product and its physical shelf/drawer storage location in the store.",
+        description: "Find a product and its physical shelf/drawer storage location in the store. Works with brand, item name, categories, varieties, and Indian colloquial terms (e.g. Kaveri Mehndi, chudi, earrings, kangan, bangles, pearl drop, bindi).",
         parameters: {
           type: "OBJECT",
           properties: {
             productName: {
               type: "STRING",
-              description: "The name or keyword of the product (e.g. Lakme, Tata Tea, eyeliner, shampoo)",
+              description: "The name, brand, variety, or Indian colloquial term of the product (e.g. Kaveri Mehndi, chudi, earrings, kangan, bangles, pearl drop, eyeliner)",
             },
           },
           required: ["productName"],
@@ -129,13 +145,13 @@ const LIVE_TOOLS = [
       },
       {
         name: "check_product_stock",
-        description: "Check the current stock quantity and health status of a product.",
+        description: "Check the current stock quantity and health status of a product or category varieties.",
         parameters: {
           type: "OBJECT",
           properties: {
             productName: {
               type: "STRING",
-              description: "The name or keyword of the product",
+              description: "The name, brand, variety, or Indian colloquial term of the product (e.g. Kaveri Mehndi, chudi, earrings, kangan, bangles, pearl drop)",
             },
           },
           required: ["productName"],
@@ -460,7 +476,8 @@ export async function getLiveSessionTokenAction(shopId: string) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const isDemo = shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+  if (!user && !isDemo) {
     return { success: false, error: "Please sign in to start a live session" };
   }
 
@@ -482,12 +499,12 @@ export async function getLiveSessionTokenAction(shopId: string) {
         .select("name, category, description, created_at, owner_id, whatsapp_number")
         .eq("id", shopId)
         .maybeSingle(),
-      user.id
+      user?.id
         ? (supabase.from("profiles") as any)
             .select("full_name, email")
             .eq("id", user.id)
             .maybeSingle()
-        : Promise.resolve({ data: null }),
+        : Promise.resolve({ data: { full_name: "Shivam (Demo)", email: "demo@koro.retail" } }),
       (supabase.from("products") as any)
         .select("id", { count: "exact", head: true })
         .eq("shop_id", shopId),
@@ -599,7 +616,8 @@ export async function executeLiveToolCallAction(input: {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const isDemo = shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+  if (!user && !isDemo) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -739,13 +757,16 @@ export async function saveLiveTurnAction(input: {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return { success: false, error: "Unauthorized" };
+  const isDemo = shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+  if (!user && !isDemo) return { success: false, error: "Unauthorized" };
+
+  const effectiveUserId = user?.id || null;
 
   try {
     if (userText?.trim()) {
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "user",
         content: userText.trim(),
         task_type: "general",
@@ -764,7 +785,7 @@ export async function saveLiveTurnAction(input: {
 
       await (supabase.from("assistant_messages") as any).insert({
         shop_id: shopId,
-        user_id: user.id,
+        user_id: effectiveUserId,
         role: "assistant",
         content: assistantText.trim(),
         task_type: taskType || "general",

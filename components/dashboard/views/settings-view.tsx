@@ -538,7 +538,7 @@ export function SettingsView({
             <button
               type="button"
               onClick={handleSignOut}
-              className="w-full inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-destructive/30 bg-destructive/5 px-5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground shadow-2xs"
+              className="w-full inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-destructive/30 bg-destructive/5 px-5 text-sm font-semibold text-destructive transition-colors hover:text-destructive-foreground shadow-2xs"
             >
               <LogOut className="h-4 w-4" />
               <span>Sign Out of Account</span>

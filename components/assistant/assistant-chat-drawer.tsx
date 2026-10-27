@@ -104,6 +104,10 @@ export function AssistantChatDrawer({
   >([]);
   const [isHistoryViewOpen, setIsHistoryViewOpen] = useState(false);
 
+  // Floating pill resume state (keeps "Continue chat" pill ready after ending call)
+  const [hasRecentLiveSession, setHasRecentLiveSession] = useState(false);
+  const [isResumeDismissed, setIsResumeDismissed] = useState(false);
+
   // Input state
   const [inputQuery, setInputQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -246,6 +250,14 @@ export function AssistantChatDrawer({
     },
   });
 
+  // Track live session activity to maintain resume capability
+  useEffect(() => {
+    if (isLive) {
+      setHasRecentLiveSession(true);
+      setIsResumeDismissed(false);
+    }
+  }, [isLive]);
+
   // Load saved drawer width on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -375,6 +387,8 @@ export function AssistantChatDrawer({
     setActiveMessages([]);
     setIsHistoryViewOpen(false);
     setInputQuery("");
+    setHasRecentLiveSession(false);
+    setIsResumeDismissed(false);
   }, [isLive, stopSession]);
 
   // Select an existing conversation from chat history
@@ -385,10 +399,25 @@ export function AssistantChatDrawer({
       }
       setActiveConversationId(convId);
       setIsHistoryViewOpen(false);
+      setHasRecentLiveSession(true);
+      setIsResumeDismissed(false);
       await loadConversationMessages(convId);
     },
     [isLive, stopSession, loadConversationMessages]
   );
+
+  // Resume live voice session directly from floating pill
+  const handleResumeLive = useCallback(() => {
+    setIsResumeDismissed(false);
+    startSession();
+  }, [startSession]);
+
+  const handleDismissResume = useCallback(() => {
+    setIsResumeDismissed(true);
+  }, []);
+
+  const currentConvTitle =
+    conversations.find((c) => c.id === activeConversationId)?.title || null;
 
   // Delete a single conversation from chat history
   const handleDeleteConversation = useCallback(
@@ -984,9 +1013,13 @@ export function AssistantChatDrawer({
         isMuted={isMuted}
         micVolume={micVolume}
         assistantVolume={assistantVolume}
+        hasRecentSession={hasRecentLiveSession && !isResumeDismissed}
+        conversationTitle={currentConvTitle}
         onToggleMute={toggleMute}
         onStop={stopSession}
         onReopen={() => onOpenChange(true)}
+        onResumeLive={handleResumeLive}
+        onDismissResume={handleDismissResume}
       />
     </>
   );

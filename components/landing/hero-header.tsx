@@ -52,7 +52,7 @@ export function HeroHeader() {
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="inline-flex h-2 w-2 rounded-full bg-success" />
         <span className="font-medium text-foreground">Instant Demo Mode:</span>
-        <span>Pre-loaded with 12 sample items &amp; sales slips. No login needed.</span>
+        <span>Pre-loaded with Pooja Store (Cosmetics &amp; Bangles, 41 items). No login needed.</span>
       </div>
 
       {/* Feature Guarantee Pills */}

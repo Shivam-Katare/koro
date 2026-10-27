@@ -21,7 +21,8 @@ export async function recordSaleSlipAction(input: RecordSaleSlipInput) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const isDemo = parseResult.data.shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+  if (!user && !isDemo) {
     return {
       success: false,
       error: "Please sign in to record sales",
@@ -74,7 +75,8 @@ export async function fetchRecentSlipsAction(shopId: string) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const isDemo = shopId === "1bd46074-6e69-4b38-83c9-d25a2999d011";
+  if (!user && !isDemo) {
     return { success: false, error: "Not authenticated", slips: [] };
   }
 

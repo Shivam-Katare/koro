@@ -9,14 +9,13 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Zibbi — AI Assistant for Local Retail Operations",
+  title: "Koro - AI Assistant for Local Retailers",
   description:
     "Find products by voice, capture stock changes from handwritten sales slips, and generate WhatsApp restock lists for local shops.",
 };
 
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/components/providers/auth-provider";
-import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

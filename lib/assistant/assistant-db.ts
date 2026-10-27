@@ -89,7 +89,132 @@ export interface AssistantExecutionResult {
   pendingAction?: AssistantPendingAction | null;
 }
 
-// Helper to resolve product matches, handling exact matches, partial matches, duplicates, and conversational pronouns
+// -------------------------------------------------------------
+// Indian Retail Semantic Dictionary & Multilingual Synonyms
+// -------------------------------------------------------------
+export const INDIAN_RETAIL_SYNONYMS: Record<string, string[]> = {
+  mehendi: ["mehndi", "mendi", "henna", "cone"],
+  mehndi: ["mehendi", "mendi", "henna", "cone"],
+  mendi: ["mehendi", "mehndi", "henna", "cone"],
+  henna: ["mehendi", "mehndi", "mendi", "cone"],
+
+  bangle: ["bangles", "chudi", "choodi", "chudiyan", "choodiyan", "kangan", "kangans", "kada", "kadas", "churi"],
+  bangles: ["bangle", "chudi", "choodi", "chudiyan", "choodiyan", "kangan", "kangans", "kada", "kadas", "churi"],
+  chudi: ["choodi", "chudiyan", "choodiyan", "bangle", "bangles", "kangan", "kangans", "kada", "kadas"],
+  choodi: ["chudi", "chudiyan", "choodiyan", "bangle", "bangles", "kangan", "kangans", "kada", "kadas"],
+  chudiyan: ["chudi", "choodi", "bangle", "bangles", "kangan", "kada"],
+  kangan: ["kangans", "bangle", "bangles", "chudi", "choodi", "kada", "kadas"],
+  kangans: ["kangan", "bangle", "bangles", "chudi", "choodi", "kada", "kadas"],
+  kada: ["kadas", "kangan", "kangans", "bangle", "bangles", "chudi"],
+  kadas: ["kada", "kangan", "kangans", "bangle", "bangles", "chudi"],
+
+  earring: ["earrings", "jhumka", "jhumkas", "jhumki", "jhumkis", "chandbali", "chandbalis", "tops", "ear tops", "ear drop", "drops", "kundan drop", "pearl drop"],
+  earrings: ["earring", "jhumka", "jhumkas", "jhumki", "jhumkis", "chandbali", "chandbalis", "tops", "ear tops", "ear drop", "drops", "kundan drop", "pearl drop"],
+  jhumka: ["jhumkas", "jhumki", "jhumkis", "earring", "earrings", "chandbali"],
+  jhumkas: ["jhumka", "jhumki", "jhumkis", "earring", "earrings", "chandbali"],
+  jhumki: ["jhumka", "jhumkas", "earring", "earrings"],
+  chandbali: ["chandbalis", "earring", "earrings", "jhumka"],
+  chandbalis: ["chandbali", "earring", "earrings", "jhumka"],
+  tops: ["ear tops", "earrings"],
+  eartops: ["ear tops", "earrings", "tops"],
+  "ear tops": ["tops", "earrings", "eartops"],
+
+  hairband: ["hairbands", "rubberband", "rubberbands", "rubber band", "rubber bands", "elastic", "band", "hair clip", "clips", "clutcher", "clutchers", "scrunchie", "scrunchies", "bobby pin", "bobby pins", "hairpin", "hairpins", "tic tac", "tictac", "claw clip", "claw clips"],
+  hairbands: ["hairband", "rubberband", "rubberbands", "rubber band", "rubber bands", "elastic", "band", "hair clip", "clips", "clutcher", "clutchers", "scrunchie", "scrunchies"],
+  rubberband: ["hairband", "hairbands", "rubber band", "elastic"],
+  "rubber band": ["hairband", "hairbands", "rubberband", "elastic"],
+  scrunchie: ["scrunchies", "hairband", "rubberband"],
+  scrunchies: ["scrunchie", "hairband", "rubberband"],
+  clutcher: ["clutchers", "hair clip", "clips", "claw clip", "banana clutcher"],
+  clutchers: ["clutcher", "hair clip", "clips", "claw clip"],
+  clip: ["clips", "hair clip", "hair clips", "tic tac", "tictac", "clutcher", "bobby pin"],
+  clips: ["clip", "hair clip", "hair clips", "tic tac", "tictac", "clutcher", "bobby pin"],
+
+  bindi: ["bindis", "bindiya", "bindiyas", "tikli", "bridal bindi", "velvet bindi", "stone bindi"],
+  bindis: ["bindi", "bindiya", "bindiyas", "tikli"],
+  bindiya: ["bindi", "bindis", "tikli"],
+
+  kajal: ["kaajal", "eyeliner", "surma", "kohl"],
+  kaajal: ["kajal", "eyeliner", "surma", "kohl"],
+  eyeliner: ["kajal", "kaajal", "liquid eyeliner"],
+
+  lipstick: ["lipsticks", "lip shade", "lip color", "lip colour", "liquid lipstick", "matte lipstick"],
+  lipsticks: ["lipstick", "lip shade", "lip color", "lip colour"],
+
+  "nail polish": ["nail paint", "nail lacquer", "nail enamel", "nail pops"],
+  "nail paint": ["nail polish", "nail lacquer", "nail pops"],
+  "nail pops": ["nail polish", "nail paint"],
+
+  sindoor: ["sindur", "kumkum", "liquid sindoor"],
+  sindur: ["sindoor", "kumkum"],
+
+  cream: ["creams", "moisturizer", "moisturiser", "cold cream", "face cream", "lotion"],
+  moisturizer: ["cream", "creams", "moisturiser", "cold cream", "lotion"],
+  moisturiser: ["cream", "creams", "moisturizer", "cold cream", "lotion"],
+
+  powder: ["powders", "talc", "talcum", "face talc", "face powder", "compact", "rose powder"],
+  talc: ["powder", "talcum", "face powder"],
+};
+
+export function levenshteinDistance(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const d: number[][] = [];
+  for (let i = 0; i <= m; i++) d[i] = [i];
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      d[i][j] = a[i - 1] === b[j - 1]
+        ? d[i - 1][j - 1]
+        : Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + 1);
+    }
+  }
+  return d[m][n];
+}
+
+const QUERY_STOPWORDS = new Set([
+  "ka", "ki", "ke", "ko", "se", "mein", "me", "par", "pe",
+  "hai", "hain", "kahan", "kidhar", "kaha", "kya", "kitna", "kitne", "kitni",
+  "show", "where", "the", "a", "an", "is", "are", "do", "does", "give", "tell",
+  "batao", "bataiye", "dikhao", "dikhaye", "check", "please", "bhi", "aur", "and", "or",
+  "product", "item", "samaan", "stock", "location"
+]);
+
+function getWordSynonyms(word: string): string[] {
+  const list = [word];
+  const stem = word.replace(/(?:es|s)$/i, "");
+  if (stem !== word) list.push(stem);
+
+  for (const [key, syns] of Object.entries(INDIAN_RETAIL_SYNONYMS)) {
+    if (key === word || key === stem) list.push(...syns);
+    if (syns.includes(word) || syns.includes(stem)) {
+      list.push(key);
+      list.push(...syns.filter((s) => s !== word));
+    }
+  }
+  return Array.from(new Set(list));
+}
+
+function wordMatchesToken(queryWord: string, targetToken: string): boolean {
+  if (queryWord === targetToken) return true;
+  if (targetToken.startsWith(queryWord) || queryWord.startsWith(targetToken)) return true;
+
+  const syns = getWordSynonyms(queryWord);
+  if (syns.some((s) => s === targetToken || targetToken.includes(s) || s.includes(targetToken))) {
+    return true;
+  }
+
+  // Levenshtein fuzzy match for typos and phonetic variations
+  if (queryWord.length >= 4 && targetToken.length >= 4) {
+    const maxDist = queryWord.length >= 7 ? 2 : 1;
+    if (levenshteinDistance(queryWord, targetToken) <= maxDist) return true;
+    for (const s of syns) {
+      if (s.length >= 4 && levenshteinDistance(s, targetToken) <= maxDist) return true;
+    }
+  }
+  return false;
+}
+
+// Helper to resolve product matches, handling exact matches, token matching, synonyms, fuzzy spelling, and category inquiries
 export function resolveProductMatch(
   products: any[],
   query: string,
@@ -98,6 +223,7 @@ export function resolveProductMatch(
   matched: any[];
   bestMatch: any | null;
   distinctNames: string[];
+  isCategoryMatch?: boolean;
 } {
   let cleanQ = (query || "").trim().toLowerCase();
 
@@ -129,50 +255,103 @@ export function resolveProductMatch(
     cleanQ = fallbackProductName.trim().toLowerCase();
   }
 
-  const cleanQStem = cleanQ.replace(/(?:es|s)$/i, "");
+  if (!cleanQ) {
+    return { matched: [], bestMatch: null, distinctNames: [] };
+  }
 
-  const matched = (products || []).filter((p: any) => {
-    const pName = p.name.trim().toLowerCase();
-    const pNameStem = pName.replace(/(?:es|s)$/i, "");
-    return (
-      pName === cleanQ ||
-      pName.includes(cleanQ) ||
-      cleanQ.includes(pName) ||
-      (cleanQStem.length > 2 && (pName.includes(cleanQStem) || cleanQStem.includes(pNameStem)))
-    );
+  // 1. Exact full match
+  const exactMatches = (products || []).filter(
+    (p: any) => (p.name || "").trim().toLowerCase() === cleanQ
+  );
+  if (exactMatches.length === 1) {
+    return {
+      matched: exactMatches,
+      bestMatch: exactMatches[0],
+      distinctNames: [exactMatches[0].name.trim()],
+    };
+  }
+
+  // 2. Tokenize query and remove noise stopwords
+  const rawTokens = cleanQ.split(/[\s,._-]+/).filter((w) => w && !QUERY_STOPWORDS.has(w));
+  const searchTokens = rawTokens.length > 0 ? rawTokens : cleanQ.split(/[\s,._-]+/).filter(Boolean);
+
+  const scored = (products || []).map((p: any) => {
+    const pName = (p.name || "").toLowerCase();
+    const pBrand = (p.brand || "").toLowerCase();
+    const nameTokens = pName.split(/[\s,._-]+/).filter(Boolean);
+    const brandTokens = pBrand.split(/[\s,._-]+/).filter(Boolean);
+    const primaryTokens = [...nameTokens, ...brandTokens];
+
+    // Exact name match
+    if (pName === cleanQ) {
+      return { p, score: 100, isExact: true };
+    }
+    // Substring match
+    if (pName.includes(cleanQ)) {
+      return { p, score: 90, isSubstring: true };
+    }
+
+    // Token-based matching against primary tokens (Name & Brand)
+    let primaryMatches = 0;
+    for (const qWord of searchTokens) {
+      if (primaryTokens.some((t) => wordMatchesToken(qWord, t))) {
+        primaryMatches++;
+      }
+    }
+
+    if (primaryMatches === 0) return { p, score: 0 };
+
+    const ratio = primaryMatches / searchTokens.length;
+    let score = ratio * 85;
+
+    // Boost if brand explicitly matches query
+    if (searchTokens.some((q) => wordMatchesToken(q, pBrand))) {
+      score += 10;
+    }
+    // Boost if all search tokens found
+    if (primaryMatches === searchTokens.length) {
+      score += 15;
+    }
+
+    return { p, score };
   });
 
-  const exactMatches = matched.filter((p: any) => {
-    const pName = p.name.trim().toLowerCase();
-    return pName === cleanQ || (cleanQStem.length > 2 && pName === cleanQStem);
-  });
+  const matchingItems = scored
+    .filter((s) => s.score >= 50)
+    .sort((a, b) => b.score - a.score)
+    .map((s) => s.p);
 
-  const distinctNames = Array.from(new Set(matched.map((m: any) => m.name.trim())));
+  const distinctNames = Array.from(new Set(matchingItems.map((m: any) => m.name.trim())));
+
+  // Check if query is a broad category inquiry (e.g. "chudi", "bangles", "earrings", "kangan")
+  const isCategoryQuery =
+    searchTokens.length === 1 &&
+    [
+      "chudi", "choodi", "bangle", "bangles", "kangan", "kangans", "kada",
+      "earring", "earrings", "jhumka", "jhumkas", "tops",
+      "hairband", "hairbands", "clip", "clips", "clutcher", "scrunchie",
+      "lipstick", "lipsticks", "nail polish", "nail paint",
+      "bindi", "bindis", "cream", "powder"
+    ].some((term) => wordMatchesToken(searchTokens[0], term));
 
   let bestMatch: any | null = null;
-  if (exactMatches.length > 0) {
-    // If duplicates exist with the exact same name, prefer the one with the most filled information
-    bestMatch = exactMatches.sort((a, b) => {
-      const scoreA =
-        (a.storage_location ? 1 : 0) +
-        (a.selling_price ? 1 : 0) +
-        (a.current_stock > 0 ? 1 : 0);
-      const scoreB =
-        (b.storage_location ? 1 : 0) +
-        (b.selling_price ? 1 : 0) +
-        (b.current_stock > 0 ? 1 : 0);
-      return scoreB - scoreA;
-    })[0];
-  } else if (distinctNames.length === 1 && matched.length > 0) {
-    bestMatch = matched[0];
-  } else if (matched.length === 1) {
-    bestMatch = matched[0];
+  if (!isCategoryQuery) {
+    if (matchingItems.length === 1) {
+      bestMatch = matchingItems[0];
+    } else if (matchingItems.length > 1) {
+      const topScore = scored.find((s) => s.p.id === matchingItems[0].id)?.score || 0;
+      const secondScore = scored.find((s) => s.p.id === matchingItems[1].id)?.score || 0;
+      if (topScore >= 90 && topScore - secondScore >= 20) {
+        bestMatch = matchingItems[0];
+      }
+    }
   }
 
   return {
-    matched,
+    matched: matchingItems,
     bestMatch,
     distinctNames,
+    isCategoryMatch: isCategoryQuery,
   };
 }
 
@@ -201,19 +380,31 @@ export async function executeFindLocation(
     };
   }
 
-  if (!resolution.bestMatch && resolution.distinctNames.length > 1) {
-    const names = resolution.distinctNames.map((n) => `"${n}"`).join(", ");
+  // If multiple matching products are found (e.g. user asked for "earrings", "chudi", "kangan", etc.)
+  if (resolution.matched.length > 1 && (!resolution.bestMatch || resolution.isCategoryMatch)) {
+    const itemsList = resolution.matched
+      .map(
+        (p: any, idx: number) =>
+          `${idx + 1}. **${p.name}**: ${p.storage_location || "Location not assigned yet"} (Stock: ${p.current_stock} units, ₹${p.selling_price || 0})`
+      )
+      .join("\n");
+
     return {
-      content: `Aapke paas multiple milte-julte items hain: ${names}. Kripya batayein aap kiska location dekhna chahte hain?`,
+      content: `Aapke paas "${query}" ke ${resolution.matched.length} items hain:\n${itemsList}`,
       taskType: "find_product",
-      structuredData: { ambiguous: true, options: resolution.distinctNames },
+      structuredData: {
+        found: true,
+        multiple: true,
+        products: resolution.matched,
+        count: resolution.matched.length,
+      },
     };
   }
 
-  const p = resolution.bestMatch!;
+  const p = resolution.bestMatch || resolution.matched[0];
   const loc = p.storage_location || "Not assigned yet";
   return {
-    content: `**${p.name}** is located at: **${loc}** (Stock: ${p.current_stock} units).`,
+    content: `**${p.name}** is located at: **${loc}** (Stock: ${p.current_stock} units, Price: ₹${p.selling_price || 0}).`,
     taskType: "find_product",
     structuredData: { found: true, product: p, location: loc },
   };
@@ -227,7 +418,7 @@ export async function executeCheckStock(
   const cleanQ = query.trim().toLowerCase();
   const { data: products } = await supabase
     .from("products")
-    .select("id, name, brand, category, current_stock, min_stock_threshold, stock_status, storage_location")
+    .select("id, name, brand, category, current_stock, min_stock_threshold, stock_status, storage_location, selling_price")
     .eq("shop_id", shopId);
 
   const resolution = resolveProductMatch(products || [], cleanQ);
@@ -240,16 +431,26 @@ export async function executeCheckStock(
     };
   }
 
-  if (!resolution.bestMatch && resolution.distinctNames.length > 1) {
-    const names = resolution.distinctNames.map((n) => `"${n}"`).join(", ");
+  if (resolution.matched.length > 1 && (!resolution.bestMatch || resolution.isCategoryMatch)) {
+    const stockList = resolution.matched
+      .map(
+        (p: any, idx: number) =>
+          `${idx + 1}. **${p.name}**: **${p.current_stock} units** in stock (Location: ${p.storage_location || "Shelf"})`
+      )
+      .join("\n");
+
     return {
-      content: `Aapke paas multiple milte-julte items hain: ${names}. Kripya batayein aap kiska stock check karna chahte hain?`,
+      content: `Aapke paas "${query}" ke ${resolution.matched.length} items hain:\n${stockList}`,
       taskType: "check_stock",
-      structuredData: { ambiguous: true, options: resolution.distinctNames },
+      structuredData: {
+        found: true,
+        multiple: true,
+        products: resolution.matched,
+      },
     };
   }
 
-  const p = resolution.bestMatch!;
+  const p = resolution.bestMatch || resolution.matched[0];
   const min = p.min_stock_threshold ?? 5;
   let statusBadge = "Healthy stock";
   if (p.current_stock <= 0) statusBadge = "⚠️ Out of Stock!";
@@ -258,7 +459,7 @@ export async function executeCheckStock(
   return {
     content: `Current stock of **${p.name}** is **${p.current_stock} units** (Min alert: ${min}). Status: **${statusBadge}**. Location: ${p.storage_location || "Shelf"}`,
     taskType: "check_stock",
-    structuredData: { found: true, product: p, status: statusBadge },
+    structuredData: { found: true, product: p, stock: p.current_stock, status: statusBadge },
   };
 }
 
@@ -2336,24 +2537,39 @@ export function matchLocalIntent(query: string, lastFocusedProduct?: string) {
     return { intent: "restock_orders", queryType: "all" };
   }
 
-  // 5. Location intent: "where is lakme", "location of tata tea", "lakme kahan hai"
+  // 5. Location intent: "where is lakme", "where are earrings", "location of tata tea", "lakme kahan hai", "chudi dikhao"
   if (
     q.startsWith("where is ") ||
+    q.startsWith("where are ") ||
+    q.startsWith("where's ") ||
     q.startsWith("location of ") ||
     q.includes(" kahan hai") ||
     q.includes(" kahan rakha") ||
-    q.includes("kidhar hai")
+    q.includes("kidhar hai") ||
+    q.includes(" kahan milegi") ||
+    q.includes(" kahan milega") ||
+    q.endsWith(" dikhao") ||
+    q.endsWith(" batao") ||
+    q.endsWith(" dikhaye") ||
+    q.endsWith(" bataiye")
   ) {
     const raw = q
-      .replace(/^where is /i, "")
-      .replace(/^location of /i, "")
+      .replace(/^where is (?:the )?/i, "")
+      .replace(/^where are (?:the )?/i, "")
+      .replace(/^where's (?:the )?/i, "")
+      .replace(/^location of (?:the )?/i, "")
       .replace(/ kahan hai/i, "")
       .replace(/ kahan rakha hai/i, "")
       .replace(/ kahan rakha/i, "")
       .replace(/ kidhar hai/i, "")
+      .replace(/ kahan milegi/i, "")
+      .replace(/ kahan milega/i, "")
+      .replace(/ (?:mujhe )?(?:bhi )?(?:dikhao|batao|dikhaye|bataiye)/i, "")
       .replace(/\?/g, "")
       .trim();
-    return { intent: "find_location", target: resolveTarget(raw) };
+    if (raw) {
+      return { intent: "find_location", target: resolveTarget(raw) };
+    }
   }
 
   // 6. Low stock: "what is low on stock", "low stock", "kya khatam hai"

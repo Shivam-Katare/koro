@@ -2,6 +2,7 @@
 
 import React, { useEffect } from "react";
 import Link from "next/link";
+import { KoroWordmark } from "@/components/brand/koro-wordmark";
 
 /* -------------------------------------------------------------------------- */
 /*                               SVG DEFINITIONS                              */
@@ -244,20 +245,17 @@ export function KoroNav() {
   return (
     <nav id="nav">
       <div className="w">
-        <Link href="/" className="wm" aria-label="Koro">
-          <i>K</i><i>o</i><i>r</i><i>o</i><b></b>
-        </Link>
+        <KoroWordmark href="/" />
         <div className="l">
           <a href="#why">Why Koro</a>
           <a href="#what">What it does</a>
           <a href="#rush">Rush hour</a>
         </div>
-        <Link href="/login" className="btn g">
-          Log in
-        </Link>
-        <Link href="/signup" className="btn p">
-          Create your shop
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/login" className="btn g">
+            Log in
+          </Link>
+        </div>
       </div>
     </nav>
   );
@@ -267,27 +265,123 @@ export function KoroNav() {
 /*                                    HERO                                    */
 /* -------------------------------------------------------------------------- */
 
+interface RotatorPhrase {
+  id: string;
+  topicId: string;
+  lang: "en" | "hi";
+  text: string;
+}
+
+const ROTATOR_PHRASES: RotatorPhrase[] = [
+  // 1. Location
+  { id: "loc_en", topicId: "location", lang: "en", text: "Where did I keep it?" },
+  { id: "loc_hi", topicId: "location", lang: "hi", text: "सामान कहाँ रखा है?" },
+
+  // 2. Stock count
+  { id: "stock_en", topicId: "stock", lang: "en", text: "How much is left?" },
+  { id: "stock_hi", topicId: "stock", lang: "hi", text: "कितना बचा है?" },
+
+  // 3. Price
+  { id: "price_en", topicId: "price", lang: "en", text: "What’s the price?" },
+  { id: "price_hi", topicId: "price", lang: "hi", text: "कितने का है?" },
+
+  // 4. WhatsApp Restock list
+  { id: "whatsapp_en", topicId: "whatsapp", lang: "en", text: "Give me WhatsApp Slip." },
+  { id: "whatsapp_hi", topicId: "whatsapp", lang: "hi", text: "WhatsApp Slip दे दो।" },
+
+  // 5. Today's sales
+  { id: "sales_en", topicId: "sales", lang: "en", text: "What sold today?" },
+  { id: "sales_hi", topicId: "sales", lang: "hi", text: "आज क्या बिका?" },
+
+  // 6. Running low / Reminders
+  { id: "reminder_en", topicId: "reminder", lang: "en", text: "What's running low?" },
+  { id: "reminder_hi", topicId: "reminder", lang: "hi", text: "क्या खत्म होने वाला है?" },
+];
+
 export function KoroHero() {
+  const [currentPhrase, setCurrentPhrase] = React.useState<RotatorPhrase>(ROTATOR_PHRASES[0]);
+  const [animState, setAnimState] = React.useState<"active" | "exiting" | "entering">("active");
+  const historyRef = React.useRef<("en" | "hi")[]>(["en"]);
+  const currentRef = React.useRef<RotatorPhrase>(ROTATOR_PHRASES[0]);
+
+  React.useEffect(() => {
+    currentRef.current = currentPhrase;
+  }, [currentPhrase]);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      // Step 1: Slide & fade out upwards
+      setAnimState("exiting");
+
+      setTimeout(() => {
+        const cur = currentRef.current;
+        const hist = historyRef.current;
+
+        // Check if last two languages were the same
+        const len = hist.length;
+        const lastTwoSame =
+          len >= 2 && hist[len - 1] === hist[len - 2] ? hist[len - 1] : null;
+
+        // Filter candidates:
+        // 1. Must NOT be the same topic (never immediate translation of current phrase)
+        // 2. If last 2 were 'en', next MUST be 'hi'
+        // 3. If last 2 were 'hi', next MUST be 'en'
+        let candidates = ROTATOR_PHRASES.filter((p) => {
+          if (p.topicId === cur.topicId) return false;
+          if (lastTwoSame === "en" && p.lang === "en") return false;
+          if (lastTwoSame === "hi" && p.lang === "hi") return false;
+          return true;
+        });
+
+        if (candidates.length === 0) {
+          candidates = ROTATOR_PHRASES.filter((p) => p.topicId !== cur.topicId);
+        }
+
+        const next = candidates[Math.floor(Math.random() * candidates.length)];
+        historyRef.current = [...hist.slice(-3), next.lang];
+        currentRef.current = next;
+        setCurrentPhrase(next);
+
+        // Step 2: Position below for entrance
+        setAnimState("entering");
+
+        // Step 3: Trigger active transition in next frame
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setAnimState("active");
+          });
+        });
+      }, 340);
+    }, 3200);
+
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <header className="hero">
       <div className="w">
-        <span className="pill">Voice assistant for local shops</span>
         <h1>
-          Where did I keep it? <mark>Just ask</mark> Koro.
+          <span className="koro-rotator" aria-live="polite">
+            <span className={`koro-rotator-item ${animState}`}>
+              {currentPhrase.text}
+            </span>
+          </span>
+          <span className="koro-heading-sub">
+            <mark>Just ask</mark> Koro.
+          </span>
         </h1>
         <p className="sub">
-          Koro remembers every product in your shop. Ask in Hindi, Hinglish or English to find an item, check stock, note
-          a sale or plan tomorrow&apos;s restock.
+          Find products, check stock, record sales and plan restocks in Hindi, Hinglish or English.
         </p>
-        <div className="cta">
-          <Link href="/signup" className="btn p lg">
-            Create your shop →
+        <div className="cta flex flex-wrap items-center justify-center gap-3">
+          <Link href="/dashboard" className="btn p lg" style={{ background: "linear-gradient(135deg, #0075de 0%, #0056a8 100%)", boxShadow: "0 4px 18px rgba(0, 117, 222, 0.35)" }}>
+            Explore Demo Shop (Instant) →
           </Link>
-          <a href="#demo" className="btn t lg">
-            Watch Koro work
-          </a>
+          <Link href="/signup" className="btn t lg">
+            Create your shop
+          </Link>
         </div>
-        <p className="note">Works beside your existing billing. Start with just a few products.</p>
+        <p className="note">Pre-loaded with Pooja Store (Cosmetics &amp; Bangles). No login or sign-up needed.</p>
 
         <div className="float" style={{ left: "2%", top: "120px" }}>
           <svg>
@@ -462,7 +556,7 @@ export function KoroWhat() {
               <use href="#scan" />
             </svg>
             <b>Scan or type</b>
-            <span>Barcode when there is one, a name when there is not.</span>
+            <span>Scan or type to add sales items.</span>
           </a>
           <a href="#what">
             <svg className="m">
@@ -551,11 +645,11 @@ export function KoroClosing() {
         </div>
         <h2>Start with what you already know.</h2>
         <p className="lead">Add a few products today. Koro learns the rest as you go.</p>
-        <div className="cta">
-          <Link href="/signup" className="btn p lg">
-            Create your shop →
+        <div className="cta flex flex-wrap items-center justify-center gap-3">
+          <Link href="/signup" className="btn t lg">
+            Create your shop
           </Link>
-          <Link href="/login" className="btn t lg">
+          <Link href="/login" className="btn g lg">
             Log in
           </Link>
         </div>
@@ -572,9 +666,7 @@ export function KoroFooter() {
   return (
     <footer>
       <div className="w">
-        <Link href="/" className="wm" aria-label="Koro">
-          <i>K</i><i>o</i><i>r</i><i>o</i><b></b>
-        </Link>
+        <KoroWordmark href="/" size="md" />
         <span>A helpful hand at the shop counter.</span>
         <a href="#what">What it does</a>
         <a href="#demo">Demo</a>
@@ -593,9 +685,10 @@ export function KoroStyles() {
     <>
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@800&family=Inter:wght@400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@600;700;800&display=swap"
       />
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         :root {
           --paper: #f6f5f4;
           --ink: #111;
@@ -614,7 +707,7 @@ export function KoroStyles() {
         .koro-page {
           background: var(--paper);
           color: var(--ink);
-          font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          font-family: 'Inter', 'Noto Sans Devanagari', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           font-size: 17px;
           line-height: 1.6;
           -webkit-font-smoothing: antialiased;
@@ -789,36 +882,50 @@ export function KoroStyles() {
           z-index: 1;
         }
 
-        .koro-page .pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--blue);
-          background: var(--tint);
-          padding: 6px 14px;
-          border-radius: 99px;
-        }
-
-        .koro-page .pill:before {
-          content: "";
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: var(--blue);
-          animation: koro-pulse 1.6s infinite;
-        }
-
         @keyframes koro-pulse {
           50% { opacity: .3; }
         }
 
         .koro-page h1 {
-          font: 700 clamp(40px, 7vw, 84px)/1.02 'Inter', sans-serif;
-          letter-spacing: -.045em;
+          font-family: 'Inter', 'Noto Sans Devanagari', system-ui, -apple-system, sans-serif;
+          font-weight: 700;
+          font-size: clamp(32px, 5.5vw, 76px);
+          line-height: 1.1;
+          letter-spacing: -.035em;
           margin: 22px auto 20px;
-          max-width: 900px;
+          max-width: 920px;
+        }
+
+        .koro-page .koro-rotator {
+          display: block;
+          min-height: 1.2em;
+          position: relative;
+        }
+
+        .koro-page .koro-rotator-item {
+          display: inline-block;
+          transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1), transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+          will-change: opacity, transform;
+        }
+
+        .koro-page .koro-rotator-item.entering {
+          opacity: 0;
+          transform: translateY(16px);
+        }
+
+        .koro-page .koro-rotator-item.active {
+          opacity: 1;
+          transform: translateY(0);
+        }
+
+        .koro-page .koro-rotator-item.exiting {
+          opacity: 0;
+          transform: translateY(-16px);
+        }
+
+        .koro-page .koro-heading-sub {
+          display: inline-block;
+          margin-top: 4px;
         }
 
         .koro-page mark {
@@ -1295,6 +1402,28 @@ export function KoroStyles() {
           .koro-page section { padding: 64px 0; }
         }
 
+        @media (max-width: 640px) {
+          .koro-page h1 {
+            font-size: clamp(26px, 7.5vw, 42px);
+            line-height: 1.15;
+            letter-spacing: -.025em;
+            margin: 16px auto 16px;
+          }
+          .koro-page .koro-rotator {
+            min-height: 1.25em;
+          }
+          .koro-page .sub {
+          font-size: 12px;
+        }
+          .koro-page .panel h3 {
+          font-size: 18px
+        }
+
+        .koro-page .panel p {
+          font-size: 12px;
+        }
+      }
+
         @media (prefers-reduced-motion: reduce) {
           .koro-page * { animation: none !important; transition: none !important; }
           .koro-page .r { opacity: 1; transform: none; }
@@ -1365,6 +1494,7 @@ export default KoroLandingPage;
 /* -------------------------------------------------------------------------- */
 
 export {
+  KoroWordmark,
   KoroHero as LandingHero,
   KoroHero as LandingDemo,
   KoroWhy as LandingBeforeAfter,

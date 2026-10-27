@@ -166,6 +166,7 @@
     transform: scale(0.9);
     opacity: 0.45;
   }
+
   100% {
     transform: scale(1.7);
     opacity: 0;
@@ -173,10 +174,12 @@
 }
 
 @keyframes koro-float {
+
   0%,
   100% {
     transform: translateY(0) rotate(-4deg);
   }
+
   50% {
     transform: translateY(-8px) rotate(3deg);
   }
@@ -191,6 +194,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .koro-ring,
   .koro-float {
     animation: none;
