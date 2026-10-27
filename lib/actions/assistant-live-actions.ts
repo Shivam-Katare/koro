@@ -124,7 +124,53 @@ Core Speaking Rules:
       * 'Cream' / 'Moisturizer' / 'Cold cream' -> face and body creams.
       * 'Nail polish' / 'Nail paint' / 'Nail pops' -> nail cosmetics.
       * 'Sindoor' / 'Sindur' / 'Kumkum' -> traditional sindoor.
-    - Always pass the core semantic keyword (e.g. 'Mehndi', 'Earrings', 'Chudi', 'Kangan', 'Pearl drop', 'Kaveri') when calling the location, stock, or price tools.`;
+    - Always pass the core semantic keyword (e.g. 'Mehndi', 'Earrings', 'Chudi', 'Kangan', 'Pearl drop', 'Kaveri') when calling the location, stock, or price tools.
+19. Recent Activity Inquiries & Immediate Answers (CRITICAL):
+    - When the shopkeeper asks about recent activity:
+      * "What is the recent item that got delivered?" / "Abhi jo deliver hua wo kaunsa item tha?" / "What is the recent item I brought/received from supplier?":
+        ALWAYS call query_restock_orders with queryType: "delivered".
+        DO NOT recite a list of multiple slips or ask the shopkeeper for a slip number!
+        Directly identify and state the exact recent item and slip number from the tool output:
+        "Aapka sabse recent deliver hua item [Item Name] hai jo Slip #[OrderNumber] mein aaya tha."
+      * "What is the recent item I sold?" / "Abhi kaunsa item bika?" / "Maine abhi kya becha?":
+        ALWAYS call query_sales_history with dateQuery: "today".
+        Directly state the most recent item sold, its quantity, and price from the top of the report:
+        "Aapka sabse recent bika hua item [Item Name] hai (₹[Price], Slip #[SlipNumber])."
+      * "What is the recent product I added?" / "Abhi jo product add kiya wo kaunsa tha?":
+        Refer directly to the recent action in this session or catalog.
+    - If the shopkeeper previously took an action in the current session (e.g. created a restock order, recorded a sale, marked arrival), maintain context of what was just done and refer to it directly.
+20. Conversational Follow-ups & Graceful Chit-Chat (CRITICAL):
+    - Avoid Repetitive Tool Calling & Repetitive Lists:
+      * If you just provided daily reminders, sales info, or order status, and the user follows up with:
+        "Okay thank you. Is there something else?", "Theek hai, aur kuch hai kya?", "Is that all?", "Any other reminders left?", "Koi aur reminder bacha hai?", "Kuch aur bacha hai?":
+        DO NOT call get_daily_reminders or any query tool again!
+        DO NOT repeat the same list of reminders or data!
+        Understand the intent: They are asking if anything ADDITIONAL is pending.
+        Warmly and concisely reply:
+        "Nahi, aur koi reminders ya pending kaam nahi hain. Bas yahi dhyan mein rakhna hai. Agar koi aur dukaan ka kaam ya naya sawaal ho toh batayein!"
+        (In English: "No, you don't have any other reminders left. That's all for now. Let me know if there's anything else you need!")
+      * If the user simply says "Thank you", "Theek hai shukriya", "Okay cool", "Accha":
+        Reply politely in 1 short phrase (e.g. "Aapka swagat hai! Agar kuch aur kaam ho toh batayein.") without re-running any tools or repeating old information.
+      * If an unexpected or conversational question occurs where the intent is unclear:
+        DO NOT repeat previous answers or tools. Politely ask for clarification in 1 short sentence:
+        "Main samjhi nahi, kya aap dukaan ke kisi specific product ya order ke baare mein puch rahe hain?"
+21. Retail Intent Equivalence (Shopkeeper Buying vs Customer Sales):
+    - Real shopkeepers use natural colloquial language rather than formal technical terms:
+      * Shopkeeper Buying / Ordering for Store -> propose_create_restock_order:
+        "I want to buy X from retailers / wholesalers"
+        "Wholesaler se samaan mangwana hai / khareedna hai"
+        "Today I want to buy something for the store"
+        "Dukaan ke liye X lena hai / order karna hai"
+        "Add an item I want to buy from retailers"
+        -> Intent is purchasing/restocking for the shop. CALL propose_create_restock_order. NEVER propose_record_sale!
+      * Customer Buying / Counter Sales -> propose_record_sale:
+        "Someone brought / bought this"
+        "Customer ne ye liya / kharida"
+        "I sold these items" / "Ye bika" / "Sale hua"
+        -> Intent is recording a counter sale to a customer. CALL propose_record_sale.
+      * Delivery Arrival -> propose_record_order_arrival:
+        "Samaan aa gaya" / "Item deliver ho gaya" / "Delivery aa gayi" / "Supplier ne bhej diya"
+        -> Intent is recording the arrival of ordered stock. CALL propose_record_order_arrival.`;
 
 const LIVE_TOOLS = [
   {
@@ -295,7 +341,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "propose_record_sale",
-        description: "Propose recording a counter sale of products (e.g. 'Today I sold 4 Nivea creams, 3 Lakme Kajals, and 2 chudis', '2 Nivea creams and 1 Lakme of Rs 50'). Supports multi-item sales in one slip, out-of-stock items, and unlinked/custom goods without refusing.",
+        description: "Propose recording a counter sale of products when a customer buys items (e.g. 'Today I sold 4 Nivea creams', 'Someone bought this', 'Customer ne ye liya', 'Ye bika', 'I sold these items'). Supports multi-item sales in one slip, out-of-stock items, and unlinked/custom goods without refusing.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -372,7 +418,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "query_sales_history",
-        description: "Lookup past sales slips and total earnings/revenue for a specific date or period, or inspect specific line items sold (e.g. 'How much did I earn', 'On 24 October what is the item I sold that was 30', 'Did I sell Lakme').",
+        description: "Lookup past sales slips, recent items sold, and total earnings/revenue for a specific date or period, or inspect specific line items sold (e.g. 'What is the recent item I sold', 'Abhi kaunsa item bika', 'How much did I earn', 'On 24 October what is the item I sold that was 30', 'Did I sell Lakme').",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -393,20 +439,20 @@ const LIVE_TOOLS = [
       },
       {
         name: "query_restock_orders",
-        description: "Query restock orders, past purchase orders, cancelled orders, waiting/pending orders, delivered orders, unit counts, and whether new restock orders are needed.",
+        description: "Query restock orders, past purchase orders, cancelled orders, waiting/pending orders, delivered orders, recent arrivals (e.g. 'What is the recent item that got delivered', 'Abhi jo deliver hua wo kaunsa item tha', 'What did I bring recently'), and whether new restock orders are needed.",
         parameters: {
           type: "OBJECT",
           properties: {
             queryType: {
               type: "STRING",
-              description: "Type of inquiry: 'cancelled', 'waiting', 'delivered', 'needs_reorder', or 'all'",
+              description: "Type of inquiry: 'delivered' (for delivered orders or recent deliveries received), 'waiting', 'cancelled', 'needs_reorder', or 'all'",
             },
           },
         },
       },
       {
         name: "propose_create_restock_order",
-        description: "Draft a purchase restock order slip for one or multiple products with WhatsApp supplier link (e.g. 'Add 10 units of serum and Nivea cream to my slip', 'Order 10 serum').",
+        description: "Draft a purchase restock order slip when the shopkeeper wants to buy or order items from suppliers/wholesalers/retailers (e.g. 'Add 10 units of serum to my slip', 'Order 10 serum', 'I want to buy items from retailers/wholesalers', 'Wholesaler se mangwana hai', 'Today I want to buy something for the shop'). Provides WhatsApp supplier link.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -561,7 +607,33 @@ export async function getLiveSessionTokenAction(shopId: string) {
       ? `\nActive Conversational Focus: The user recently discussed product "${lastFocusedProduct}". If they say "update this product's price as well", "price 50 kar do", or use pronouns like "it", "this", "iska", "use" without naming a new product, assume they mean "${lastFocusedProduct}".`
       : "";
 
-    const liveInstruction = `${LIVE_SYSTEM_INSTRUCTION}${shopContext}${focusContext}`;
+    const recentEvents: string[] = [];
+    for (const m of (recentMsgsRes.data || []).slice(0, 6)) {
+      const meta = (m.metadata as any) || {};
+      const pending = meta.pendingAction;
+      if (pending?.actionType === "record_sale" || m.task_type === "record_sale") {
+        const prod = pending?.productName || meta.productName || "items";
+        recentEvents.push(`Created sales slip for "${prod}"`);
+      } else if (pending?.actionType === "create_restock_order" || m.task_type === "create_restock_order") {
+        const prod = pending?.productName || meta.productName || "items";
+        recentEvents.push(`Drafted restock order for "${prod}"`);
+      } else if (pending?.actionType === "record_order_arrival" || m.task_type === "record_order_arrival") {
+        const prod = pending?.productName || meta.productName || "delivery";
+        recentEvents.push(`Marked restock delivery as arrived for "${prod}"`);
+      } else if (pending?.actionType === "update_product_location") {
+        recentEvents.push(`Updated location for "${pending?.productName}" to "${pending?.newLocation}"`);
+      } else if (pending?.actionType === "update_product_price") {
+        recentEvents.push(`Updated price for "${pending?.productName}" to ₹${pending?.newPrice}`);
+      } else if (m.task_type === "daily_reminders") {
+        recentEvents.push(`Checked daily reminders`);
+      }
+    }
+
+    const sessionActivityContext = recentEvents.length > 0
+      ? `\nRecent Activity in Current Session:\n${recentEvents.map((e) => `• ${e}`).join("\n")}\n(Keep this context in mind so you never forget recent actions you or the shopkeeper just took!)`
+      : "";
+
+    const liveInstruction = `${LIVE_SYSTEM_INSTRUCTION}${shopContext}${focusContext}${sessionActivityContext}`;
 
     const token = await ai.authTokens.create({
       config: {

@@ -1576,7 +1576,11 @@ export async function executeGetSalesHistory(
 
   const extraLineCount = enrichedLines.length > 8 ? `\n...and ${enrichedLines.length - 8} more items.` : "";
 
-  const content = `**${label} Sales Report**:\n• Total Earnings: **₹${totalEarnings.toLocaleString("en-IN")}**\n• Total Slips: **${slipCount} bills**\n• Total Units Sold: **${totalUnitsSold} items**\n\n**Sold Items Detail**:\n${lineItemsList}${extraLineCount}`;
+  const recentSoldHighlight = enrichedLines.length > 0
+    ? `Sabse recent bika hua item: **${enrichedLines[0].quantity}x ${enrichedLines[0].itemName}** (₹${enrichedLines[0].unitPrice} each, Slip #${enrichedLines[0].slipNumber}).\n\n`
+    : "";
+
+  const content = `${recentSoldHighlight}**${label} Sales Report**:\n• Total Earnings: **₹${totalEarnings.toLocaleString("en-IN")}**\n• Total Slips: **${slipCount} bills**\n• Total Units Sold: **${totalUnitsSold} items**\n\n**Sold Items Detail**:\n${lineItemsList}${extraLineCount}`;
 
   return {
     content,
@@ -1587,6 +1591,7 @@ export async function executeGetSalesHistory(
       slipCount,
       totalUnitsSold,
       topItems,
+      mostRecentSoldItem: enrichedLines[0] || null,
       lineItems: enrichedLines,
     },
   };
@@ -1859,8 +1864,8 @@ export async function executeGetRestockOrdersSummary(
     };
   }
 
-  // 3. Delivered Orders
-  if (qType.includes("deliver") || qType.includes("arrived")) {
+  // 3. Delivered Orders (and recent arrivals)
+  if (qType.includes("deliver") || qType.includes("arrived") || qType.includes("recent") || qType.includes("received")) {
     if (deliveredOrders.length === 0) {
       return {
         content: "Abhi tak koi order delivered mark nahi hua hai.",
@@ -1869,10 +1874,40 @@ export async function executeGetRestockOrdersSummary(
       };
     }
 
+    const mostRecentOrder = deliveredOrders[0];
+    const mostRecentOrderItems = items.filter((it) => it.order_id === mostRecentOrder.id);
+    const mostRecentItemNames = mostRecentOrderItems.length > 0
+      ? mostRecentOrderItems.map((it) => `${it.product_name} (${it.received_quantity || it.ordered_quantity} pcs)`).join(", ")
+      : `${mostRecentOrder.total_units} units`;
+
+    const deliveredSummaryList = deliveredOrders
+      .slice(0, 3)
+      .map((o) => {
+        const orderItems = items.filter((it) => it.order_id === o.id);
+        const itemNames = orderItems.length > 0
+          ? orderItems.map((it) => `${it.product_name} (${it.received_quantity || it.ordered_quantity} pcs)`).join(", ")
+          : `${o.total_units} units`;
+        return `• Slip **#${o.order_number}**: ${itemNames} (${o.distributor_name || "Supplier"})`;
+      })
+      .join("\n");
+
     return {
-      content: `Total **${deliveredOrders.length} restock orders deliver** ho chuke hain (Total **${deliveredUnits} units** inventory mein add ho chuke hain).`,
+      content: `Sabse recent deliver hua order: **Slip #${mostRecentOrder.order_number}** jisme **${mostRecentItemNames}** deliver hue hain (${mostRecentOrder.distributor_name || "Supplier"}).\n\nTotal **${deliveredOrders.length} restock orders deliver** ho chuke hain:\n${deliveredSummaryList}`,
       taskType: "restock_orders",
-      structuredData: { count: deliveredOrders.length, units: deliveredUnits },
+      structuredData: {
+        count: deliveredOrders.length,
+        units: deliveredUnits,
+        mostRecentOrder: {
+          id: mostRecentOrder.id,
+          orderNumber: mostRecentOrder.order_number,
+          distributor: mostRecentOrder.distributor_name || "Supplier",
+          items: mostRecentOrderItems.map((it) => ({
+            name: it.product_name,
+            quantity: it.received_quantity || it.ordered_quantity,
+          })),
+        },
+        orders: deliveredOrders.slice(0, 5),
+      },
     };
   }
 
@@ -1911,7 +1946,19 @@ export async function executeGetRestockOrdersSummary(
     orderAdvice = `⚠️ **${unOrderedLowStock.length} items** ka stock low hai jinhe restock order karne ki zarurat hai.`;
   }
 
-  const content = `**Restock & Orders Summary**:\n• ⏳ **Waiting**: ${waitingOrders.length} orders (${waitingUnits} units aane baaki)\n• ✅ **Delivered**: ${deliveredOrders.length} orders (${deliveredUnits} units received)\n• ❌ **Cancelled**: ${cancelledOrders.length} orders (${cancelledUnits} units)\n\n${orderAdvice}`;
+  let recentDeliveryHighlight = "";
+  if (deliveredOrders.length > 0) {
+    const mostRecent = deliveredOrders[0];
+    const recItems = items.filter((it) => it.order_id === mostRecent.id);
+    const recNames = recItems.length > 0
+      ? recItems.map((it) => `${it.product_name} (${it.received_quantity || it.ordered_quantity})`).slice(0, 3).join(", ")
+      : "";
+    if (recNames) {
+      recentDeliveryHighlight = `• 📦 **Recent Delivery**: Slip #${mostRecent.order_number} (${recNames})\n`;
+    }
+  }
+
+  const content = `**Restock & Orders Summary**:\n• ⏳ **Waiting**: ${waitingOrders.length} orders (${waitingUnits} units aane baaki)\n• ✅ **Delivered**: ${deliveredOrders.length} orders (${deliveredUnits} units received)\n${recentDeliveryHighlight}• ❌ **Cancelled**: ${cancelledOrders.length} orders (${cancelledUnits} units)\n\n${orderAdvice}`;
 
   return {
     content,
@@ -2268,12 +2315,26 @@ export function matchLocalIntent(query: string, lastFocusedProduct?: string) {
   };
 
   // 0. Daily Reminders Intent: "what's today's reminder", "what are my today's reminders", "reminders", "aaj ke reminder"
+  const isFollowUpOrOther =
+    q.includes("aur koi") ||
+    q.includes("any other") ||
+    q.includes("anything else") ||
+    q.includes("something else") ||
+    q.includes("aur kuch") ||
+    q.includes("kuch aur") ||
+    q.includes("is that all") ||
+    q.includes("bacha hai") ||
+    q.includes("thank you") ||
+    q.includes("thanks") ||
+    q.includes("shukriya");
+
   if (
-    q.includes("reminder") ||
-    q.includes("reminders") ||
-    q.includes("aaj ke reminder") ||
-    q.includes("kya reminder") ||
-    q.includes("remind me")
+    !isFollowUpOrOther &&
+    (q.includes("reminder") ||
+      q.includes("reminders") ||
+      q.includes("aaj ke reminder") ||
+      q.includes("kya reminder") ||
+      q.includes("remind me"))
   ) {
     return { intent: "daily_reminders" };
   }
