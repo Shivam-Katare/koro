@@ -20,6 +20,7 @@ import {
   executeProposeRecordArrival,
   executeGetDailyReminders,
   executeProposeCreateRestockOrder,
+  executeGetRecentAddedProducts,
 } from "@/lib/assistant/assistant-db";
 
 const LIVE_SYSTEM_INSTRUCTION = `You are "Koro", a fast, polite, and accurate female AI voice assistant for an Indian retail shopkeeper (kirana, cosmetics, general store, pharmacy, stationery).
@@ -136,8 +137,10 @@ Core Speaking Rules:
         ALWAYS call query_sales_history with dateQuery: "today".
         Directly state the most recent item sold, its quantity, and price from the top of the report:
         "Aapka sabse recent bika hua item [Item Name] hai (₹[Price], Slip #[SlipNumber])."
-      * "What is the recent product I added?" / "Abhi jo product add kiya wo kaunsa tha?":
-        Refer directly to the recent action in this session or catalog.
+      * "What is the recent product I added?" / "Abhi jo product add kiya wo kaunsa tha?" / "What product did I add 2 days ago?" / "Maine pehle kya add kiya tha?":
+        ALWAYS call get_recent_added_products.
+        Directly state the recent product name, when it was added (e.g. 2 din pehle, abhi, kal), its price and location:
+        "Aapka sabse recent added product [Product Name] hai jo [time ago] add hua tha."
     - If the shopkeeper previously took an action in the current session (e.g. created a restock order, recorded a sale, marked arrival), maintain context of what was just done and refer to it directly.
 20. Conversational Follow-ups & Graceful Chit-Chat (CRITICAL):
     - Avoid Repetitive Tool Calling & Repetitive Lists:
@@ -287,6 +290,23 @@ const LIVE_TOOLS = [
         parameters: {
           type: "OBJECT",
           properties: {},
+        },
+      },
+      {
+        name: "get_recent_added_products",
+        description: "Lookup the most recent products added to the shop catalog (e.g. 'What is the recent product I added', 'Abhi kaunsa naya product add kiya', 'What product did I add 2 days ago', 'Latest added items'). Returns newly added products sorted by newest first with relative time, price, stock, and storage location.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            limit: {
+              type: "INTEGER",
+              description: "Number of recent products to return (default 5, max 20)",
+            },
+            category: {
+              type: "STRING",
+              description: "Optional category filter (e.g. 'cosmetics', 'kirana', 'jewelry')",
+            },
+          },
         },
       },
       {
@@ -724,6 +744,13 @@ export async function executeLiveToolCallAction(input: {
       });
     } else if (toolName === "get_store_inventory_summary") {
       toolResult = await executeGetInventorySummary(supabase, shopId);
+    } else if (toolName === "get_recent_added_products") {
+      toolResult = await executeGetRecentAddedProducts(
+        supabase,
+        shopId,
+        args.limit ? Number(args.limit) : 5,
+        args.category
+      );
     } else if (toolName === "propose_update_product_location") {
       toolResult = await executeProposeUpdateLocation(
         supabase,

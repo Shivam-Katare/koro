@@ -35,6 +35,7 @@ export interface AssistantResponsePayload {
     | "inventory_summary"
     | "daily_reminders"
     | "create_restock_order"
+    | "recent_products"
     | "general";
   structuredData?: any;
   pendingAction?: AssistantPendingAction | null;
@@ -60,6 +61,7 @@ import {
   executeProposeRecordArrival,
   executeGetDailyReminders,
   executeProposeCreateRestockOrder,
+  executeGetRecentAddedProducts,
   matchLocalIntent,
 } from "@/lib/assistant/assistant-db";
 
@@ -242,6 +244,9 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
     } else if (localMatch.intent === "daily_reminders") {
       const res = await executeGetDailyReminders(supabase, shopId);
       resultPayload = { role: "assistant", ...res };
+    } else if (localMatch.intent === "recent_products") {
+      const res = await executeGetRecentAddedProducts(supabase, shopId, 5);
+      resultPayload = { role: "assistant", ...res };
     } else if (localMatch.intent === "create_restock_order" && ((localMatch as any).items?.length || (localMatch as any).target)) {
       const items = (localMatch as any).items || [
         { productName: (localMatch as any).target, quantity: (localMatch as any).quantity || 10 },
@@ -400,6 +405,23 @@ export async function queryAssistantAction(input: QueryAssistantInput) {
               parameters: {
                 type: Type.OBJECT,
                 properties: {},
+              },
+            },
+            {
+              name: "get_recent_added_products",
+              description: "Lookup the most recent products added to the shop catalog (e.g. 'What is the recent product I added', 'Abhi kaunsa naya product add kiya', 'What product did I add 2 days ago', 'Latest added items'). Returns newly added products sorted by newest first with relative time, price, stock, and storage location.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  limit: {
+                    type: Type.INTEGER,
+                    description: "Number of recent products to return (default 5, max 20)",
+                  },
+                  category: {
+                    type: Type.STRING,
+                    description: "Optional category filter (e.g. 'cosmetics', 'kirana', 'jewelry')",
+                  },
+                },
               },
             },
             {
@@ -722,8 +744,10 @@ Rules:
         ALWAYS call query_sales_history with dateQuery: "today".
         Directly state the most recent item sold, its quantity, and price from the top of the report:
         "Aapka sabse recent bika hua item [Item Name] hai (₹[Price], Slip #[SlipNumber])."
-      * "What is the recent product I added?" / "Abhi jo product add kiya wo kaunsa tha?":
-        Refer directly to the recent action in this session or catalog.
+      * "What is the recent product I added?" / "Abhi jo product add kiya wo kaunsa tha?" / "What product did I add 2 days ago?" / "Maine pehle kya add kiya tha?":
+        ALWAYS call get_recent_added_products.
+        Directly state the recent product name, when it was added (e.g. 2 din pehle, abhi, kal), its price and location:
+        "Aapka sabse recent added product [Product Name] hai jo [time ago] add hua tha."
     - If the shopkeeper previously took an action in the current session (e.g. created a restock order, recorded a sale, marked arrival), maintain context of what was just done and refer to it directly.
 20. Conversational Follow-ups & Graceful Chit-Chat (CRITICAL):
     - Avoid Repetitive Tool Calling & Repetitive Lists:
@@ -820,6 +844,13 @@ Rules:
             });
           } else if (call.name === "get_store_inventory_summary") {
             toolResult = await executeGetInventorySummary(supabase, shopId);
+          } else if (call.name === "get_recent_added_products") {
+            toolResult = await executeGetRecentAddedProducts(
+              supabase,
+              shopId,
+              args.limit ? Number(args.limit) : 5,
+              args.category
+            );
           } else if (call.name === "propose_update_product_location") {
             toolResult = await executeProposeUpdateLocation(
               supabase,

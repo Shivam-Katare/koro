@@ -84,6 +84,7 @@ export interface AssistantExecutionResult {
     | "inventory_summary"
     | "daily_reminders"
     | "create_restock_order"
+    | "recent_products"
     | "general";
   structuredData?: any;
   pendingAction?: AssistantPendingAction | null;
@@ -770,6 +771,116 @@ export async function executeGetInventorySummary(
       totalProducts,
       totalUnits,
       lowStockCount,
+    },
+  };
+}
+
+export async function executeGetRecentAddedProducts(
+  supabase: any,
+  shopId: string,
+  limit: number = 5,
+  category?: string
+): Promise<AssistantExecutionResult> {
+  const fetchLimit = Math.min(20, Math.max(1, limit || 5));
+  let query = (supabase.from("products") as any)
+    .select("id, name, brand, category, selling_price, cost_price, current_stock, storage_location, created_at")
+    .eq("shop_id", shopId)
+    .order("created_at", { ascending: false })
+    .limit(fetchLimit);
+
+  if (category && category.trim()) {
+    query = query.ilike("category", `%${category.trim()}%`);
+  }
+
+  const { data: products, error } = await query;
+
+  if (error) {
+    return {
+      content: `Recent products load karne mein dikkat aayi: ${error.message}`,
+      taskType: "recent_products",
+      structuredData: { error: error.message },
+    };
+  }
+
+  const list = products || [];
+  if (list.length === 0) {
+    return {
+      content: category
+        ? `Aapki shop mein "${category}" category ka koi product nahi mila.`
+        : "Aapki shop inventory mein abhi koi product added nahi hai.",
+      taskType: "recent_products",
+      structuredData: { count: 0, products: [] },
+    };
+  }
+
+  const formatTimeAgo = (dateStr: string) => {
+    if (!dateStr) return "recently";
+    const now = new Date();
+    const created = new Date(dateStr);
+    const diffMs = now.getTime() - created.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 60) {
+      return diffMins <= 1 ? "abhi kuch der pehle" : `${diffMins} minute pehle`;
+    }
+    if (diffHours < 24) {
+      return `${diffHours} ghante pehle`;
+    }
+    if (diffDays === 1) {
+      return "kal (1 din pehle)";
+    }
+    if (diffDays < 30) {
+      return `${diffDays} din pehle`;
+    }
+    return created.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  };
+
+  const mostRecent = list[0];
+  const timeAgoStr = formatTimeAgo(mostRecent.created_at);
+  const locationStr = mostRecent.storage_location ? `Location: **${mostRecent.storage_location}**` : "Location: unassigned";
+  const priceStr = mostRecent.selling_price !== null && mostRecent.selling_price !== undefined ? `₹${mostRecent.selling_price}` : "Price: not set";
+  const stockStr = `${mostRecent.current_stock ?? 0} units`;
+
+  const topRecentSummary = list
+    .slice(0, 5)
+    .map((p: any, idx: number) => {
+      const when = formatTimeAgo(p.created_at);
+      const loc = p.storage_location ? `[${p.storage_location}]` : "[No location]";
+      const rate = p.selling_price !== null && p.selling_price !== undefined ? `₹${p.selling_price}` : "-";
+      return `${idx + 1}. **${p.name}** — ${rate}, Stock: ${p.current_stock ?? 0} (${when}) ${loc}`;
+    })
+    .join("\n");
+
+  const content = `Aapka sabse recent added product **${mostRecent.name}** hai jo **${timeAgoStr}** add kiya gaya tha (${priceStr}, ${stockStr}, ${locationStr}).\n\n**Holiye mein add kiye gaye products**:\n${topRecentSummary}`;
+
+  return {
+    content,
+    taskType: "recent_products",
+    structuredData: {
+      count: list.length,
+      mostRecentProduct: {
+        id: mostRecent.id,
+        name: mostRecent.name,
+        brand: mostRecent.brand,
+        category: mostRecent.category,
+        sellingPrice: mostRecent.selling_price,
+        currentStock: mostRecent.current_stock,
+        storageLocation: mostRecent.storage_location,
+        createdAt: mostRecent.created_at,
+        timeAgo: timeAgoStr,
+      },
+      products: list.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        brand: p.brand,
+        category: p.category,
+        sellingPrice: p.selling_price,
+        currentStock: p.current_stock,
+        storageLocation: p.storage_location,
+        createdAt: p.created_at,
+      })),
     },
   };
 }
@@ -2337,6 +2448,22 @@ export function matchLocalIntent(query: string, lastFocusedProduct?: string) {
       q.includes("remind me"))
   ) {
     return { intent: "daily_reminders" };
+  }
+
+  // 0b. Recent Added Products Intent: "what's the recent product I added", "recent product added", "latest added products", "abhi kaunsa product add kiya", "2 din pehle kaunsa product add kiya"
+  const isRecentProductsQuery =
+    (q.includes("recent") || q.includes("latest") || q.includes("abhi") || q.includes("naya") || q.includes("haliye") || q.includes("pehle")) &&
+    (q.includes("product") || q.includes("item") || q.includes("samaan")) &&
+    (q.includes("add") || q.includes("added") || q.includes("daala") || q.includes("joda") || q.includes("banaya")) &&
+    !q.includes("location") &&
+    !q.includes("price") &&
+    !q.includes("sale") &&
+    !q.includes("sold") &&
+    !q.includes("order") &&
+    !q.includes("restock");
+
+  if (isRecentProductsQuery) {
+    return { intent: "recent_products" };
   }
 
   // 1. Delete Product: "delete product lakme", "lakme ko delete kar do", "delete this product"
