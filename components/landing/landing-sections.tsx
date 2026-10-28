@@ -3,6 +3,10 @@
 import React, { useEffect } from "react";
 import Link from "next/link";
 import { KoroWordmark } from "@/components/brand/koro-wordmark";
+import { DemoTrailerPlayer } from "@/components/landing/demo-trailer-player";
+import { WhyAudioCard } from "@/components/landing/why-audio-card";
+import { MicAudioPlayer } from "@/components/landing/mic-audio-player";
+import { MiniAudioCard } from "@/components/landing/mini-audio-card";
 
 /* -------------------------------------------------------------------------- */
 /*                               SVG DEFINITIONS                              */
@@ -252,6 +256,27 @@ export function KoroNav() {
           <a href="#rush">Rush hour</a>
         </div>
         <div className="flex items-center gap-2">
+          <a
+            href="https://github.com/shivam-Katare/koro"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub repository"
+            className="inline-flex items-center justify-center w-10 h-10 rounded-lg text-[#12315a] hover:text-[#0075de] hover:bg-[#e6f3fe] border border-transparent hover:border-[#dbe7f3] transition-all duration-150"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+              />
+            </svg>
+          </a>
           <Link href="/login" className="btn g">
             Log in
           </Link>
@@ -405,23 +430,10 @@ export function KoroHero() {
         </div>
 
         <div className="demo" id="demo">
-          <div className="dc">
-            <button aria-label="Play demo" type="button">
-              <svg width="30" height="30">
-                <use href="#play" />
-              </svg>
-            </button>
-            <h3>Watch Koro work</h3>
-            <p>Interactive demo coming here</p>
-          </div>
-          <div className="float" style={{ left: "-28px", bottom: "-30px", animationDelay: "-3s" }}>
+          <DemoTrailerPlayer />
+          <div className="float" style={{ left: "-28px", bottom: "-30px", animationDelay: "-3s", pointerEvents: "none" }}>
             <svg>
               <use href="#basket" />
-            </svg>
-          </div>
-          <div className="float" style={{ right: "-24px", top: "-36px", animationDelay: "-5s" }}>
-            <svg>
-              <use href="#scan" />
             </svg>
           </div>
         </div>
@@ -453,14 +465,14 @@ export function KoroWhy() {
             <h3>Stop flipping through pages</h3>
             <div className="fix">Ask by voice. Koro already knows the answer.</div>
           </div>
-          <div className="card">
-            <svg className="m">
-              <use href="#tray" />
-            </svg>
-            <span className="was">Items hide in drawers and boxes</span>
-            <h3>Know exactly where it is</h3>
-            <div className="fix">Koro names the shelf, drawer or box.</div>
-          </div>
+          <WhyAudioCard
+            iconHref="#tray"
+            wasText="Items hide in drawers and boxes"
+            heading="Know exactly where it is"
+            fixText="Koro names the shelf, drawer or box."
+            audioSrc="/media/relocation.mp3"
+            audioLabel="Tap to listen"
+          />
           <div className="card">
             <svg className="m">
               <use href="#shelf" />
@@ -498,34 +510,20 @@ export function KoroWhat() {
               <i />
               <i />
             </div>
-            <div className="me">Where is Lakmé kajal?</div>
+            <div className="me">What&apos;s my reminder for today?</div>
             <div className="ko">
-              Found it. Next to the second drawer.
+              You have 3 reminders for today.
               <div className="res">
                 <svg className="m">
-                  <use href="#pin" />
+                  <use href="#bell" />
                 </svg>
                 <div>
-                  <b>Lakmé Eyconic Kajal</b>
-                  <small>Next to the 2nd drawer</small>
+                  <b>Diwali is coming </b>
+                  <small>You should order more fairy lights</small>
                 </div>
-                <span className="ok">7 in stock</span>
               </div>
             </div>
-            <div className="mic">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#fff"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <rect x="9" y="3" width="6" height="12" rx="3" />
-                <path d="M5 11a7 7 0 0014 0M12 18v3" />
-              </svg>
-            </div>
+            <MicAudioPlayer />
           </div>
         </div>
 
@@ -572,13 +570,13 @@ export function KoroWhat() {
             <b>Today&apos;s sales</b>
             <span>Ask what sold today and how much came in.</span>
           </a>
-          <a href="#what">
-            <svg className="m">
-              <use href="#truck" />
-            </svg>
-            <b>Restock on WhatsApp</b>
-            <span>Build the purchase list and send it to your supplier.</span>
-          </a>
+          <MiniAudioCard
+            iconHref="#truck"
+            title="Restock on WhatsApp"
+            description="Build the purchase list and send it to your supplier."
+            audioSrc="/media/wholesale.mp3"
+            audioLabel="Tap to listen"
+          />
           <a href="#what">
             <svg className="m">
               <use href="#bell" />
@@ -668,10 +666,55 @@ export function KoroFooter() {
       <div className="w">
         <KoroWordmark href="/" size="md" />
         <span>A helpful hand at the shop counter.</span>
-        <a href="#what">What it does</a>
-        <a href="#demo">Demo</a>
-        <Link href="/login">Log in</Link>
-      </div>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "10px 16px",
+            color: "#756966",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            letterSpacing: "0.01em",
+          }}
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+            style={{ flexShrink: 0 }}
+          >
+            <path
+              d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"
+              fill="#ff0000ff"
+              fillOpacity="0.85"
+            />
+          </svg>
+
+          <span>
+            Built with <span style={{ color: "#f10909ff", fontWeight: 600 }}>care</span>,
+            inspired by my mom&apos;s shop by
+          </span>
+
+          <Link
+            href="https://github.com/Shivam-Katare"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: "#A94F50",
+              fontWeight: 600,
+              textDecoration: "none",
+              borderBottom: "1px solid rgba(169, 79, 80, 0.4)",
+              paddingBottom: "1px",
+              whiteSpace: "nowrap",
+              transition: "color 180ms ease",
+            }}
+          >
+            Shivam Katare
+          </Link>
+        </span>     </div>
     </footer>
   );
 }
@@ -1024,7 +1067,7 @@ export function KoroStyles() {
         }
 
         .koro-page .demo .float {
-          z-index: 2;
+          z-index: 999;
         }
 
         /* sections */
