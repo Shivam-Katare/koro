@@ -49,4 +49,15 @@ I used Wispr Flow throughout the build, from dictating prompts for coding agents
 
 Open [http://localhost:3000](http://localhost:3000) to view the app locally.
 
-**Demo store note:** Gemini free-tier rate limits may temporarily affect AI responses in the hosted demo. The demo store and its manual workflows remain usable.
+## Media
+
+<table border="0">
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://github.com/user-attachments/assets/d0001672-d581-4566-bafa-b0e0acc91044" alt="image" width="100%"/>
+    </td>
+    <td width="50%" valign="top">
+      <img src="https://github.com/user-attachments/assets/9bbf802e-4dae-4f73-a3a8-1a5b234f129c" alt="Screenshot (1858)" width="100%"/>
+    </td>
+  </tr>
+</table>
