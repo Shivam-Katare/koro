@@ -51,7 +51,7 @@ export function DemoTrailerPlayer() {
     const handleFullscreenChange = () => {
       const activeFs = Boolean(
         document.fullscreenElement ||
-          (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
+        (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
       );
       setIsFullscreen(activeFs);
     };
@@ -177,7 +177,7 @@ export function DemoTrailerPlayer() {
 
     const isFs = Boolean(
       document.fullscreenElement ||
-        (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
+      (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
     );
 
     if (!isFs) {
@@ -192,7 +192,7 @@ export function DemoTrailerPlayer() {
       }
     } else {
       if (document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
+        document.exitFullscreen().catch(() => { });
       } else if (
         (document as unknown as { webkitExitFullscreen?: () => void })?.webkitExitFullscreen
       ) {
@@ -304,9 +304,8 @@ export function DemoTrailerPlayer() {
       onKeyDown={handleKeyDown}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      className={`relative w-full aspect-video rounded-xl sm:rounded-2xl overflow-hidden bg-slate-950 border border-slate-200/80 dark:border-slate-800 shadow-[0_25px_60px_-15px_rgba(0,60,120,0.22)] select-none group focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-all ${
-        isFullscreen ? "rounded-none border-none max-w-none h-full" : "max-w-[1040px] mx-auto"
-      }`}
+      className={`relative w-full aspect-video rounded-xl sm:rounded-2xl overflow-hidden bg-slate-950 border border-slate-200/80 dark:border-slate-800 shadow-[0_25px_60px_-15px_rgba(0,60,120,0.22)] select-none group focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-all ${isFullscreen ? "rounded-none border-none max-w-none h-full" : "max-w-[1040px] mx-auto"
+        }`}
       aria-label="Koro Product Demo Trailer Video Player"
     >
       {/* HTML5 Video Element */}
@@ -384,11 +383,11 @@ export function DemoTrailerPlayer() {
               </button>
             </div>
 
-            <h3 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-white mb-2 max-w-xl">
-              See How Koro Works For Local Shops
+            <h3 className="mt-6 text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-white mb-4 max-w-xl">
+              Play Trailer
             </h3>
-            <p className="text-xs sm:text-sm text-slate-300/90 max-w-md leading-relaxed hidden sm:block">
-              Voice billing, instant shelf check, and restock lists in action. Click to play.
+            <p className="mt-4 text-xs sm:text-sm text-slate-300/90 max-w-md leading-relaxed hidden sm:block">
+              A quick look at Koro
             </p>
           </div>
 
@@ -411,11 +410,10 @@ export function DemoTrailerPlayer() {
       {/* ========================================================================= */}
       {hasStarted && (
         <div
-          className={`absolute inset-x-0 bottom-0 z-20 transition-opacity duration-300 ${
-            showControls || !isPlaying
+          className={`absolute inset-x-0 bottom-0 z-20 transition-opacity duration-300 ${showControls || !isPlaying
               ? "opacity-100 pointer-events-auto"
               : "opacity-0 pointer-events-none"
-          }`}
+            }`}
         >
           {/* Gradient backdrop */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-transparent pointer-events-none -top-12" />

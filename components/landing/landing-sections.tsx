@@ -7,6 +7,7 @@ import { DemoTrailerPlayer } from "@/components/landing/demo-trailer-player";
 import { KoroWhy } from "@/components/landing/why-koro";
 import { MicAudioPlayer } from "@/components/landing/mic-audio-player";
 import { MiniAudioCard } from "@/components/landing/mini-audio-card";
+import { ExternalLink } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
 /*                               SVG DEFINITIONS                              */
@@ -445,6 +446,13 @@ export function KoroHero() {
 
         <div className="demo" id="demo">
           <DemoTrailerPlayer />
+
+          <div className="w-full flex item-center justify-center mt-[1rem]">
+            <Link href="https://youtu.be/_JWejnDfWi4?si=qlI_5yaa8ILxFwSg" target="_blank">
+              <span className="flex items-center gap-1 text-[#0075de]"> <ExternalLink /> See Demo Video</span>
+            </Link>
+          </div>
+
           <div className="float" style={{ left: "-28px", bottom: "-30px", animationDelay: "-3s", pointerEvents: "none" }}>
             <svg>
               <use href="#basket" />
