@@ -21,6 +21,7 @@ import {
   executeGetDailyReminders,
   executeProposeCreateRestockOrder,
   executeGetRecentAddedProducts,
+  executeGetSeasonalMarketTrends,
 } from "@/lib/assistant/assistant-db";
 
 const LIVE_SYSTEM_INSTRUCTION = `You are "Koro", a fast, polite, and accurate female AI voice assistant for an Indian retail shopkeeper (kirana, cosmetics, general store, pharmacy, stationery).
@@ -173,7 +174,22 @@ Core Speaking Rules:
         -> Intent is recording a counter sale to a customer. CALL propose_record_sale.
       * Delivery Arrival -> propose_record_order_arrival:
         "Samaan aa gaya" / "Item deliver ho gaya" / "Delivery aa gayi" / "Supplier ne bhej diya"
-        -> Intent is recording the arrival of ordered stock. CALL propose_record_order_arrival.`;
+        -> Intent is recording the arrival of ordered stock. CALL propose_record_order_arrival.
+      * CRITICAL GUARD - Questions & Advice vs Placing an Order:
+        - When the shopkeeper asks ANY question, recommendation, advice, or feasibility (e.g. "Diwali aa rahi hai kya samaan layein?", "Kya mangwana chahiye?", "Fairy lights rakhna theek rahega?", "Winter mein kya chalega?"):
+          THIS IS A QUESTION, NOT AN ORDER!
+          NEVER call propose_create_restock_order! NEVER trigger an order confirmation popup!
+          ALWAYS call get_seasonal_market_trends or provide answers in speech/text.
+        - ONLY call propose_create_restock_order when the user gives an explicit command to draft or place an order (e.g. "10 piece fairy lights ka order bana do", "Wholesaler ke liye order slip taiyaar karo", "Ye samaan slip mein daal do").
+22. Seasonal & Festive Market Restock Trends (Smart Wholesale Advice):
+    - When the shopkeeper asks what to bring, stock, or prepare for an upcoming festival (Diwali, Karwa Chauth, Eid, Christmas, New Year), season (winter cold creams, summer, wedding season), or general market demand (e.g. "Diwali aa rahi hai kya samaan layein?", "Market mein kya naya chal raha hai?", "Winter ke liye kya mangwana chahiye?"):
+      ALWAYS call get_seasonal_market_trends with 'festivalOrSeason' and 'query'.
+    - When the shopkeeper asks a FOLLOW-UP question about those recommendations (e.g. "Fairy lights mein kaunse types zyada chalte hain?", "Cold cream mein margin kitna hota hai?", "Kaunse brands zyada bikte hain?"):
+      ALWAYS call get_seasonal_market_trends with 'query' set to their exact follow-up question.
+      DO NOT repeat the earlier general overview or list! Answer their specific question directly.
+    - Sane Conversational Tone & Delivery:
+      Speak in a natural, warm, and helpful tone (2-3 spoken sentences in clear Hindi/Hinglish). Balance new high-demand market items (e.g. fairy lights, festive jewellery, winter creams) with their proven catalog bestsellers. Never abruptly stop or read dry bullet points. Never suggest out-of-category or hazardous items (e.g. no firecrackers for cosmetics, no decor for medicine).
+    - NEVER propose an order draft or confirmation popup during trend advisory or follow-up questions. Only provide clear spoken/written suggestions and guidance.`;
 
 const LIVE_TOOLS = [
   {
@@ -472,7 +488,7 @@ const LIVE_TOOLS = [
       },
       {
         name: "propose_create_restock_order",
-        description: "Draft a purchase restock order slip when the shopkeeper wants to buy or order items from suppliers/wholesalers/retailers (e.g. 'Add 10 units of serum to my slip', 'Order 10 serum', 'I want to buy items from retailers/wholesalers', 'Wholesaler se mangwana hai', 'Today I want to buy something for the shop'). Provides WhatsApp supplier link.",
+        description: "Draft a purchase restock order slip ONLY when the shopkeeper explicitly commands to order, buy, or prepare a supplier slip for specific items/quantities (e.g. 'Add 10 units of serum to my slip', 'Order 10 serum', 'Wholesaler ke liye 10 piece ka order bana do'). DO NOT call this when the shopkeeper is asking advice, asking what to buy, or asking questions about trends or festivals. Provides WhatsApp supplier link.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -523,6 +539,23 @@ const LIVE_TOOLS = [
             quantity: {
               type: "INTEGER",
               description: "Units received",
+            },
+          },
+        },
+      },
+      {
+        name: "get_seasonal_market_trends",
+        description: "Get category-specific festive and seasonal restocking advice, market trends, high-margin retail product ideas for Indian festivals (Diwali, Karwa Chauth, Eid, Christmas, New Year, Wedding season, Winter, Summer), and answer follow-up queries about wholesale margins, product varieties, or customer demand.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            festivalOrSeason: {
+              type: "STRING",
+              description: "The festival or season mentioned (e.g. 'diwali', 'christmas', 'winter', 'wedding_season', 'karwa_chauth', 'holi', 'eid', 'summer')",
+            },
+            query: {
+              type: "STRING",
+              description: "Specific user question, item inquiry, or follow-up question (e.g. 'fairy lights variety and rates', 'cold cream brands', 'what items to bring for diwali')",
             },
           },
         },
@@ -815,10 +848,23 @@ export async function executeLiveToolCallAction(input: {
         orderNumber: args.orderNumber,
         quantity: args.quantity ? Number(args.quantity) : undefined,
       });
+    } else if (toolName === "get_seasonal_market_trends") {
+      toolResult = await executeGetSeasonalMarketTrends(supabase, shopId, {
+        festivalOrSeason: args.festivalOrSeason,
+        query: args.query,
+      });
     } else {
       return { success: false, error: `Unknown tool: ${toolName}` };
     }
 
+
+    let speechText = toolResult.content;
+    if (toolName === "get_seasonal_market_trends" && toolResult.content) {
+      const paragraphs = toolResult.content.split(/\n\s*\n/).map((p: string) => p.trim()).filter(Boolean);
+      if (paragraphs.length > 0 && !paragraphs[0].startsWith("*") && !paragraphs[0].startsWith("-")) {
+        speechText = paragraphs[0];
+      }
+    }
 
     return {
       success: true,
@@ -828,7 +874,7 @@ export async function executeLiveToolCallAction(input: {
         pendingAction: toolResult.pendingAction || null,
       },
       pendingAction: toolResult.pendingAction || null,
-      speechText: toolResult.content,
+      speechText,
       taskType: toolResult.taskType,
     };
   } catch (err: unknown) {

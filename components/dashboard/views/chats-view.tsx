@@ -110,10 +110,10 @@ export function ChatsView({ shop }: ChatsViewProps) {
         setConversations((prev) => prev.filter((c) => c.id !== convId));
         toast.success("Conversation deleted");
       } else {
-        toast.error((res as any).error || "Failed to delete conversation");
+        toast.error((res as any).error || "Demo account does not have permission to delete conversations");
       }
     } catch {
-      toast.error("Failed to delete conversation");
+      toast.error("Demo account does not have permission to delete conversations");
     } finally {
       setDeletingId(null);
     }

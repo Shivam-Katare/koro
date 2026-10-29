@@ -228,16 +228,26 @@ export function AssistantChatDrawer({
     },
     onStockAdjustmentProposed: (action) => {
       liveActionProposedInTurnRef.current = true;
-      let promptText = `Maine **${action.productName}** ke liye details taiyaar ki hain. Kripya niche confirm karein:`;
+      const targetName =
+        action.productName ||
+        (action.items && action.items.length > 0
+          ? `${action.items.length} items`
+          : "order");
+      let promptText = `Maine **${targetName}** ke liye details taiyaar ki hain. Kripya niche confirm karein:`;
       if (action.actionType === "delete_product") {
-        promptText = `⚠️ **${action.productName}** ko delete karne ke liye confirmation chahiye. Niche review karein:`;
+        promptText = `⚠️ **${targetName}** ko delete karne ke liye confirmation chahiye. Niche review karein:`;
       } else if (action.actionType === "record_sale") {
         promptText =
           action.items && action.items.length > 1
             ? `**${action.items.length} items** ka sales slip record karne ke liye details screen par taiyaar hain:`
-            : `**${action.productName}** ka sale record karne ke liye details screen par taiyaar hain:`;
+            : `**${targetName}** ka sale record karne ke liye details screen par taiyaar hain:`;
       } else if (action.actionType === "record_order_arrival") {
-        promptText = `**${action.productName}** ka stock delivery arrival record karne ke liye details taiyaar hain:`;
+        promptText = `**${targetName}** ka stock delivery arrival record karne ke liye details taiyaar hain:`;
+      } else if (action.actionType === "create_restock_order") {
+        promptText =
+          action.items && action.items.length > 1
+            ? `**${action.items.length} items** ka restock order draft taiyaar hai:`
+            : `**${targetName}** ka restock order draft taiyaar hai:`;
       }
       setActiveMessages((prev) => [
         ...prev,

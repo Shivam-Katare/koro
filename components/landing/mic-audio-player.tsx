@@ -1,15 +1,28 @@
 "use client";
 
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback, useId } from "react";
 import { Pause } from "lucide-react";
 
 interface MicAudioPlayerProps {
   audioSrc?: string;
+  label?: string;
+  playingLabel?: string;
+  mobileLabel?: string;
+  ariaLabel?: string;
+  className?: string;
 }
 
-export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPlayerProps) {
+export function MicAudioPlayer({
+  audioSrc = "/media/reminders.mp3",
+  label = "Hear voice demo",
+  playingLabel = "Playing... tap to stop",
+  mobileLabel = "Tap to listen",
+  ariaLabel,
+  className = "",
+}: MicAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const uniqueId = useId();
 
   // Default volume to 100% (high)
   useEffect(() => {
@@ -17,6 +30,23 @@ export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPl
       audioRef.current.volume = 1.0;
     }
   }, []);
+
+  // Listen for other audio players starting to play so only one audio plays at a time
+  useEffect(() => {
+    const handleGlobalAudioPlay = (e: Event) => {
+      const customEvent = e as CustomEvent<{ id: string }>;
+      if (customEvent.detail?.id !== uniqueId && audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        setIsPlaying(false);
+      }
+    };
+
+    window.addEventListener("koro-audio-play", handleGlobalAudioPlay);
+    return () => {
+      window.removeEventListener("koro-audio-play", handleGlobalAudioPlay);
+    };
+  }, [uniqueId]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -30,11 +60,18 @@ export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPl
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise
-          .then(() => setIsPlaying(true))
+          .then(() => {
+            setIsPlaying(true);
+            window.dispatchEvent(
+              new CustomEvent("koro-audio-play", {
+                detail: { id: uniqueId },
+              })
+            );
+          })
           .catch((err) => console.warn("Mic audio play error:", err));
       }
     }
-  }, [isPlaying]);
+  }, [isPlaying, uniqueId]);
 
   // Strictly no loop: when finished, stop and reset cleanly
   const handleEnded = () => {
@@ -51,8 +88,11 @@ export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPl
     }
   };
 
+  const currentAriaLabel =
+    ariaLabel || (isPlaying ? "Stop audio playback" : `Play ${label} audio`);
+
   return (
-    <div className="relative flex flex-col items-center self-center my-1 select-none">
+    <div className={`relative flex flex-col items-start sm:items-center self-start sm:self-center my-1 select-none ${className}`}>
       {/* HTML5 Audio Element (preloaded metadata, no loop) */}
       <audio
         ref={audioRef}
@@ -69,7 +109,7 @@ export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPl
         type="button"
         onClick={togglePlay}
         onKeyDown={handleKeyDown}
-        aria-label={isPlaying ? "Stop voice reminder audio" : "Play voice reminder audio demo"}
+        aria-label={currentAriaLabel}
         className={`mic cursor-pointer transition-transform duration-200 hover:scale-105 active:scale-95 outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
           isPlaying ? "scale-105 shadow-[0_0_0_3px_#fff,0_0_0_7px_#0075de]" : ""
         }`}
@@ -127,7 +167,7 @@ export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPl
           className="text-xs font-semibold text-[#0075de] tracking-tight"
           style={{ fontFamily: "'Baloo 2', 'Inter', system-ui, sans-serif" }}
         >
-          {isPlaying ? "Playing... tap to stop" : "Hear voice demo"}
+          {isPlaying ? playingLabel : label}
         </span>
       </div>
 
@@ -137,7 +177,7 @@ export function MicAudioPlayer({ audioSrc = "/media/reminders.mp3" }: MicAudioPl
           className="text-[11px] font-semibold text-[#0075de]"
           style={{ fontFamily: "'Baloo 2', 'Inter', system-ui, sans-serif" }}
         >
-          {isPlaying ? "Playing... tap to stop" : "Tap to listen"}
+          {isPlaying ? playingLabel : mobileLabel}
         </span>
       </div>
     </div>

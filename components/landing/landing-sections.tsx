@@ -4,7 +4,7 @@ import React, { useEffect } from "react";
 import Link from "next/link";
 import { KoroWordmark } from "@/components/brand/koro-wordmark";
 import { DemoTrailerPlayer } from "@/components/landing/demo-trailer-player";
-import { WhyAudioCard } from "@/components/landing/why-audio-card";
+import { KoroWhy } from "@/components/landing/why-koro";
 import { MicAudioPlayer } from "@/components/landing/mic-audio-player";
 import { MiniAudioCard } from "@/components/landing/mini-audio-card";
 
@@ -16,6 +16,20 @@ export function KoroSvgDefs() {
   return (
     <svg width="0" height="0" style={{ position: "absolute", width: 0, height: 0 }} aria-hidden="true">
       <defs>
+        <symbol
+          id="sparkle"
+          viewBox="0 0 64 64"
+          fill="none"
+          stroke="#12315a"
+          strokeWidth="3"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        >
+          <path d="M32 6v52M6 32h52" stroke="#ffb110" strokeWidth="3.5" />
+          <path d="M14 14l36 36M50 14L14 50" stroke="#f64932" strokeWidth="2.5" />
+          <circle cx="32" cy="32" r="10" fill="#0075de" />
+          <circle cx="32" cy="32" r="4" fill="#fff" />
+        </symbol>
         <symbol
           id="pin"
           viewBox="0 0 64 64"
@@ -446,46 +460,7 @@ export function KoroHero() {
 /*                                  WHY KORO                                  */
 /* -------------------------------------------------------------------------- */
 
-export function KoroWhy() {
-  return (
-    <section id="why">
-      <div className="w r">
-        <div className="eb">Why Koro</div>
-        <h2>Shops run on memory. Memory forgets.</h2>
-        <p className="lead">
-          Handwritten slips, a notebook, and whatever the owner remembers. Koro turns all of it into something you can
-          simply ask.
-        </p>
-        <div className="three">
-          <div className="card">
-            <svg className="m">
-              <use href="#ledger" />
-            </svg>
-            <span className="was">Stock lives in a notebook</span>
-            <h3>Stop flipping through pages</h3>
-            <div className="fix">Ask by voice. Koro already knows the answer.</div>
-          </div>
-          <WhyAudioCard
-            iconHref="#tray"
-            wasText="Items hide in drawers and boxes"
-            heading="Know exactly where it is"
-            fixText="Koro names the shelf, drawer or box."
-            audioSrc="/media/relocation.mp3"
-            audioLabel="Tap to listen"
-          />
-          <div className="card">
-            <svg className="m">
-              <use href="#shelf" />
-            </svg>
-            <span className="was">You learn it ran out when a customer asks</span>
-            <h3>See it before it runs out</h3>
-            <div className="fix">Low stock is flagged early, with a restock list ready.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
+export { KoroWhy };
 
 /* -------------------------------------------------------------------------- */
 /*                                WHAT IT DOES                                */
@@ -575,7 +550,6 @@ export function KoroWhat() {
             title="Restock on WhatsApp"
             description="Build the purchase list and send it to your supplier."
             audioSrc="/media/wholesale.mp3"
-            audioLabel="Tap to listen"
           />
           <a href="#what">
             <svg className="m">

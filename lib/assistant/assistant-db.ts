@@ -85,6 +85,7 @@ export interface AssistantExecutionResult {
     | "daily_reminders"
     | "create_restock_order"
     | "recent_products"
+    | "seasonal_market_trends"
     | "general";
   structuredData?: any;
   pendingAction?: AssistantPendingAction | null;
@@ -2942,5 +2943,162 @@ export function matchLocalIntent(query: string, lastFocusedProduct?: string) {
 
   return null;
 }
+
+/**
+ * Retrieves AI-powered festive & seasonal market trends tailored to the shop's registered category,
+ * past high-velocity sales slips, and current market demand.
+ * Capable of answering specific follow-up questions (margins, types, wholesale tips).
+ */
+export async function executeGetSeasonalMarketTrends(
+  supabase: any,
+  shopId: string,
+  params: {
+    festivalOrSeason?: string;
+    query?: string;
+  }
+): Promise<AssistantExecutionResult> {
+  // 1. Fetch Shop details
+  const { data: shop } = await (supabase.from("shops") as any)
+    .select("name, category, description")
+    .eq("id", shopId)
+    .maybeSingle();
+
+  const shopCategory = shop?.category || "Cosmetics & Bangles / Jewelry";
+  const shopName = shop?.name || "Local Retail Store";
+
+  // 2. Fetch Catalog products & recent sales slips for data grounding
+  const [prodsRes, recentLinesRes] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, name, current_stock, selling_price, category")
+      .eq("shop_id", shopId)
+      .limit(60),
+    (supabase.from("sales_slip_lines") as any)
+      .select("product_name, quantity, unit_price")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: false })
+      .limit(80),
+  ]);
+
+  // Aggregate past sales volume to find proven bestsellers
+  const itemCounts = new Map<string, number>();
+  for (const line of recentLinesRes.data || []) {
+    if (line.product_name) {
+      itemCounts.set(
+        line.product_name,
+        (itemCounts.get(line.product_name) || 0) + Number(line.quantity || 1)
+      );
+    }
+  }
+  const topSellers = Array.from(itemCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, qty]) => `${name} (${qty} units sold recently)`);
+
+  const existingCatalogNames = (prodsRes.data || []).slice(0, 25).map((p: any) => p.name);
+
+  // 3. Determine real-world calendar season
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1; // 1 to 12
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  const currentMonthName = monthNames[currentMonth - 1];
+
+  let currentActiveSeason = "Upcoming Festive Shopping Season";
+  if (currentMonth >= 9 && currentMonth <= 11) {
+    currentActiveSeason = "Diwali, Karwa Chauth, Dhanteras, Bhai Dooj & Winter Wedding Season";
+  } else if (currentMonth === 12 || currentMonth === 1) {
+    currentActiveSeason = "Winter Season, Christmas, New Year & Republic Day";
+  } else if (currentMonth >= 2 && currentMonth <= 4) {
+    currentActiveSeason = "Holi, Spring & Summer Season";
+  } else if (currentMonth >= 5 && currentMonth <= 7) {
+    currentActiveSeason = "Summer Skincare, Refreshment & School Reopening";
+  } else if (currentMonth === 8) {
+    currentActiveSeason = "Raksha Bandhan, Teej & Independence Day";
+  }
+
+  const queryText =
+    params.query?.trim() ||
+    (params.festivalOrSeason
+      ? `${params.festivalOrSeason} ke liye kya samaan layein?`
+      : "Diwali ke liye dukaan par kya naya samaan layein?");
+
+  // 4. Synthesize with Gemini using Google Search Grounding for live internet market trends
+  const apiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
+  if (apiKey) {
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `You are "Koro", an expert retail business advisor on Indian local retail wholesale market trends and seasonal restocking for local dukandars.
+Store Details:
+- Store Name: "${shopName}"
+- Store Category: "${shopCategory}"
+- Current Real-World Calendar Month: ${currentMonthName} (Active Season in India: ${currentActiveSeason})
+- Shopkeeper Inquiry: "${queryText}"
+${params.festivalOrSeason ? `- Mentioned Festival / Event: "${params.festivalOrSeason}"` : ""}
+
+CRITICAL ADVISORY & REAL-TIME TREND RULES:
+1. Seasonality & Reality Check (NEVER BE A YES-MAN):
+   - Compare the user's question or festival to the real-world calendar (${currentMonthName} / ${currentActiveSeason}):
+   - If the user asks about an OFF-SEASON item or festival (e.g. asking about Holi colors, pichkari, or herbal gulal in October/Diwali season; or winter cold creams in May; or Diwali lights in February):
+     DO NOT AGREE! DO NOT SAY YES!
+     Firmly and politely explain why it is a bad business decision: the festival is months away (e.g. Holi is in March, ~5 months away), customers will not buy it now, and their cash/working capital will be locked in dead stock. Direct them to the active festival/season (${currentActiveSeason}) instead.
+2. Category Appropriateness:
+   - Match the advice to the store category: "${shopCategory}".
+   - For Cosmetics & Bangles/Jewelry/General:
+     * High-margin festive products: water-sensor LED diyas (water lights), artistic LED fairy/curtain lighting, velvet bangles with kundan latkan, stone jhumkas, cosmetics gift hampers, bridal makeup kits, Kaveri mehendi.
+     * NEVER recommend firecrackers/explosives, medicines, or unrelated goods.
+   - For Pharmacy: Burn care (Burnol/Silverex), pollution masks, eye irritation drops.
+   - For Kirana: Dry fruit gift packs, pooja samagri, ghee, sweets.
+3. Real Wholesale Market Trends (Ground via Google Search):
+   - Bring fresh, viral wholesale trends that are actively performing in Indian wholesale markets right now.
+   - Mention realistic wholesale buying prices, retail selling rates, and profit margins (e.g. 50-70% margin).
+   - DO NOT just repeat existing catalog inventory; the shopkeeper wants fresh market trends and high-margin product ideas.
+4. Tone & Format:
+   - Start with a natural, warm, and direct 2-3 sentence spoken reply in friendly Hindi/Hinglish (spoken by an experienced mentor).
+   - If recommending items, provide a clean markdown breakdown of 2-3 top trending wholesale items with reason and typical margin.`;
+
+      const response = await ai.models.generateContent({
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      const replyText = response.text?.trim();
+      if (replyText) {
+        return {
+          content: replyText,
+          taskType: "seasonal_market_trends",
+          structuredData: {
+            season: currentActiveSeason,
+            category: shopCategory,
+            query: queryText,
+          },
+          pendingAction: null,
+        };
+      }
+    } catch (err: any) {
+      console.warn("Gemini live search seasonal market trends generation error:", err?.message || err);
+    }
+  }
+
+  // Graceful fallback if API or internet search is unreachable
+  return {
+    content: `Aapki ${shopCategory} dukaan ke liye ${currentActiveSeason} par water-sensor LED diyas, decorative fairy lights, aur festive bangles/jewellery sabse zyada bikte hain. Saath hi fast-moving items pehle se mangwa lijiye taaki festival rush mein samaan khatam na ho.`,
+    taskType: "seasonal_market_trends",
+    structuredData: { season: currentActiveSeason, category: shopCategory },
+    pendingAction: null,
+  };
+}
+
 
 

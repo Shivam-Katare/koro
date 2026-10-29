@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { scanBillSlipAction } from "@/lib/actions/slip-scan-actions";
 import { useSalesStore, type SaleDraftLine } from "@/lib/store/use-sales-store";
 import type { ExtractedSlipLine } from "@/lib/types/slip-extractor";
+import { SAMPLE_BILL_IMAGE_URL, SAMPLE_BILL_ITEMS } from "@/lib/data/sample-bill-data";
 import {
   Camera,
   UploadCloud,
@@ -43,6 +44,8 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
   const [imageMime, setImageMime] = useState<string>("image/jpeg");
   const [rotation, setRotation] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSample, setIsSample] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [extractedLines, setExtractedLines] = useState<ExtractedSlipLine[]>([]);
   const [extractionMethod, setExtractionMethod] = useState<"gemini" | "local_ocr" | null>(null);
 
@@ -59,6 +62,8 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
     }
 
     setImageMime(file.type);
+    setIsSample(false);
+    setScanError(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       const base64 = event.target?.result as string;
@@ -70,15 +75,37 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
     reader.readAsDataURL(file);
   };
 
+  // Instant 1-Click Sample Bill Loader (Zero external API call, instant single-spinner feedback)
+  const handleLoadSampleBill = () => {
+    setIsProcessing(true);
+    setScanError(null);
+
+    // Instant local load without any network API call
+    setTimeout(() => {
+      setImagePreview(SAMPLE_BILL_IMAGE_URL);
+      setImageMime("image/svg+xml");
+      setRotation(0);
+      setIsSample(true);
+      setExtractedLines(
+        SAMPLE_BILL_ITEMS.map((item) => ({
+          ...item,
+          id: `sample-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        }))
+      );
+      setExtractionMethod("gemini");
+      setIsProcessing(false);
+      toast.success("Loaded Sample Retail Bill with 5 matched items!");
+    }, 180);
+  };
+
   // Rotate image by 90 degrees
   const handleRotate = () => {
     setRotation((prev) => (prev + 90) % 360);
   };
 
-  // Convert current image with rotation into rotated base64
-  const getRotatedBase64 = async (base64: string, deg: number): Promise<string> => {
-    if (deg === 0) return base64;
-
+  // Convert current image with rotation into compressed/resized rotated base64
+  // Clamps max dimension to 1280px to guarantee sub-second upload speeds
+  const getProcessedBase64 = async (base64: string, deg: number): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -86,20 +113,33 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
         const ctx = canvas.getContext("2d");
         if (!ctx) return resolve(base64);
 
-        if (deg === 90 || deg === 270) {
-          canvas.width = img.height;
-          canvas.height = img.width;
-        } else {
-          canvas.width = img.width;
-          canvas.height = img.height;
+        let targetWidth = deg === 90 || deg === 270 ? img.height : img.width;
+        let targetHeight = deg === 90 || deg === 270 ? img.width : img.height;
+
+        const MAX_DIM = 1280;
+        let scale = 1;
+        if (targetWidth > MAX_DIM || targetHeight > MAX_DIM) {
+          scale = Math.min(MAX_DIM / targetWidth, MAX_DIM / targetHeight);
+          targetWidth = Math.round(targetWidth * scale);
+          targetHeight = Math.round(targetHeight * scale);
         }
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
 
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.rotate((deg * Math.PI) / 180);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        ctx.drawImage(
+          img,
+          (-img.width * scale) / 2,
+          (-img.height * scale) / 2,
+          img.width * scale,
+          img.height * scale
+        );
 
-        resolve(canvas.toDataURL(imageMime || "image/jpeg"));
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
       };
+      img.onerror = () => resolve(base64);
       img.src = base64;
     });
   };
@@ -110,9 +150,10 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
 
     setIsProcessing(true);
     setExtractedLines([]);
+    setScanError(null);
 
     try {
-      const orientedBase64 = await getRotatedBase64(imagePreview, rotation);
+      const orientedBase64 = await getProcessedBase64(imagePreview, rotation);
 
       const res = await scanBillSlipAction({
         shopId,
@@ -121,7 +162,9 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
       });
 
       if (!res.success || res.lines.length === 0) {
-        toast.error(res.error || "No clear items found. Please check slip lighting.");
+        const errMessage = res.error || "No clear items found. Please check slip lighting.";
+        setScanError(errMessage);
+        toast.error(errMessage);
         return;
       }
 
@@ -134,7 +177,9 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
           : `Extracted ${res.lines.length} items via Local Engine!`
       );
     } catch (err: any) {
-      toast.error(err?.message || "Failed to scan slip");
+      const errMessage = err?.message || "Failed to scan slip";
+      setScanError(errMessage);
+      toast.error(errMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -193,6 +238,8 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
     setExtractedLines([]);
     setExtractionMethod(null);
     setIsProcessing(false);
+    setIsSample(false);
+    setScanError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -242,7 +289,7 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
           </DialogHeader>
 
           {/* Body */}
-          <div className="p-4 sm:p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+          <div className="p-4 sm:p-5 space-y-4 max-h-[75vh] overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {/* Hidden File Input */}
             <input
               ref={fileInputRef}
@@ -254,31 +301,67 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
             />
 
             {!imagePreview ? (
-              /* Dropzone / Upload Prompt */
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-border hover:border-primary/50 rounded-2xl p-8 sm:p-10 text-center cursor-pointer transition-colors bg-muted/10 hover:bg-muted/25 flex flex-col items-center justify-center space-y-3"
-              >
-                <div className="h-12 w-12 rounded-2xl bg-muted/60 border border-border flex items-center justify-center text-muted-foreground shadow-2xs">
-                  <UploadCloud className="h-6 w-6" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-foreground">
-                    Click to capture or upload bill photo
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Supports handwritten counter parchi, printed receipts, or slips
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-3 rounded-lg text-xs gap-1.5 cursor-pointer shadow-none pointer-events-none mt-1"
+              /* Dropzone & Sample Bill Selection */
+              <div className="space-y-3">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-border hover:border-primary/50 rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-colors bg-muted/10 hover:bg-muted/25 flex flex-col items-center justify-center space-y-3"
                 >
-                  <Camera className="h-3.5 w-3.5" />
-                  <span>Choose Image</span>
-                </Button>
+                  <div className="h-12 w-12 rounded-2xl bg-muted/60 border border-border flex items-center justify-center text-muted-foreground shadow-2xs">
+                    <UploadCloud className="h-6 w-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">
+                      Click to capture or upload bill photo
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Supports handwritten counter parchi, printed receipts, or slips
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-3 rounded-lg text-xs gap-1.5 cursor-pointer shadow-none pointer-events-none mt-1"
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    <span>Choose Image</span>
+                  </Button>
+                </div>
+
+                {/* 1-Click Sample Bill Card for Demo & Judges */}
+                <div className="p-3.5 rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-9 w-9 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center text-primary shrink-0">
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <span>Try Store Sample Bill</span>
+                        <Badge variant="secondary" className="text-[10px] py-0 px-1.5 bg-primary/20 text-primary border-primary/30">
+                          Instant
+                        </Badge>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        Pooja Store counter slip • 5 pre-matched catalog items
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleLoadSampleBill}
+                    disabled={isProcessing}
+                    className="h-8 px-3.5 rounded-xl text-xs font-semibold shrink-0 gap-1.5 cursor-pointer bg-primary text-primary-foreground shadow-xs hover:opacity-90"
+                  >
+                    {isProcessing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    <span>Try Bill</span>
+                  </Button>
+                </div>
               </div>
             ) : (
               /* Image Preview & Scan Controls */
@@ -294,7 +377,16 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
                     className="max-h-[260px] max-w-full object-contain"
                   />
 
-                  {/* Toolbar overlay: Rotate / Flip & Retake */}
+                  {/* Sample Badge */}
+                  {isSample && (
+                    <div className="absolute top-2 left-2">
+                      <Badge className="bg-primary/90 text-primary-foreground text-[10px] py-0.5 px-2 font-medium shadow-md gap-1">
+                        <Sparkles className="h-2.5 w-2.5" /> Verified Sample Slip
+                      </Badge>
+                    </div>
+                  )}
+
+                  {/* Toolbar overlay: Rotate & Retake */}
                   <div className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/75 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10">
                     {/* Rotate / Flip Button */}
                     <button
@@ -316,12 +408,50 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
                       title="Upload different image"
                       className="p-1.5 rounded-md hover:bg-white/20 text-white transition-colors cursor-pointer text-xs"
                     >
-                      Change
+                      Upload New
                     </button>
+
+                    {!isSample && (
+                      <>
+                        <div className="h-3 w-px bg-white/20" />
+                        <button
+                          type="button"
+                          onClick={handleLoadSampleBill}
+                          title="Load verified sample bill"
+                          className="p-1.5 rounded-md hover:bg-white/20 text-primary transition-colors cursor-pointer text-xs flex items-center gap-1"
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>Use Sample</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                {/* Scan Action Button */}
+                {/* Intelligent Guardrail Alert for Non-Bills (e.g. Medical Prescriptions) */}
+                {scanError && (
+                  <div className="p-3.5 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 flex items-start gap-3 text-xs animate-in fade-in duration-200">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                    <div className="space-y-1.5 flex-1">
+                      <p className="font-semibold text-foreground">Document Validation Notice</p>
+                      <p className="leading-relaxed opacity-90">{scanError}</p>
+                      <div className="pt-1 flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={handleLoadSampleBill}
+                          className="h-7 px-2.5 text-[11px] bg-background hover:bg-muted border-amber-500/30 text-foreground cursor-pointer gap-1"
+                        >
+                          <Sparkles className="h-3 w-3 text-primary" />
+                          <span>Load Verified Sample Bill</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Scan Action Button (only shown if not sample and not yet extracted) */}
                 {extractedLines.length === 0 && (
                   <Button
                     type="button"
@@ -332,7 +462,7 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
                     {isProcessing ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Analyzing Slip (Cloud Vision &amp; Local OCR)...</span>
+                        <span>Analyzing Slip with AI...</span>
                       </>
                     ) : (
                       <>
@@ -353,7 +483,11 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
                     <span className="text-xs font-semibold text-foreground">
                       Extracted Items ({extractedLines.length})
                     </span>
-                    {extractionMethod === "gemini" ? (
+                    {isSample ? (
+                      <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-primary/10 text-primary border-primary/20 font-medium gap-1">
+                       Demo Sample Bill
+                      </Badge>
+                    ) : extractionMethod === "gemini" ? (
                       <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-medium gap-1">
                         <Sparkles className="h-2.5 w-2.5" /> Cloud Vision
                       </Badge>
@@ -369,7 +503,7 @@ export function SalesSlipScannerDialog({ shopId, trigger }: SalesSlipScannerDial
                   </span>
                 </div>
 
-                <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-[240px] overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden pr-1">
                   {extractedLines.map((line) => (
                     <div
                       key={line.id}

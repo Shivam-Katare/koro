@@ -7,6 +7,7 @@ import { useDashboardNav } from "@/lib/hooks/use-dashboard-nav";
 import type { Shop, Profile } from "@/lib/supabase/types";
 import { KoroGlyph } from "@/components/brand/koro-face";
 import { Facehash } from "facehash";
+import Link from "next/link";
 import {
   Store,
   Tag,
@@ -23,6 +24,7 @@ import {
   X,
   User,
   LogOut,
+  ArrowLeft,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
@@ -36,6 +38,7 @@ interface SettingsViewProps {
 }
 
 const BRAND_COLORS = ["#ffb110", "#62aef0", "#0075de", "#4cc38a", "#f64932", "#ff9db1"];
+const DEMO_SHOP_ID = "1bd46074-6e69-4b38-83c9-d25a2999d011";
 
 export function SettingsView({
   shop,
@@ -45,6 +48,10 @@ export function SettingsView({
   onShopUpdated,
 }: SettingsViewProps) {
   const { handleSignOut } = useDashboardNav();
+  const isDemo =
+    shop?.id === DEMO_SHOP_ID ||
+    shop?.is_demo === true ||
+    profile?.email?.includes("demo@koro.retail");
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(shop?.name || "");
   const [category, setCategory] = useState(shop?.category || SHOP_CATEGORIES[0]);
@@ -175,8 +182,21 @@ export function SettingsView({
           {!isEditing ? (
             <button
               type="button"
-              onClick={() => setIsEditing(true)}
-              className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90 shadow-sm"
+              onClick={() => {
+                if (isDemo) {
+                  toast.error("Store details cannot be edited in demo mode");
+                  return;
+                }
+                setIsEditing(true);
+              }}
+              disabled={isDemo}
+              title={isDemo ? "Store details cannot be edited in demo mode" : "Edit Store Details"}
+              className={cn(
+                "inline-flex h-11 items-center gap-2 rounded-full px-5 text-base font-semibold shadow-sm transition-all",
+                isDemo
+                  ? "cursor-not-allowed border border-border bg-muted text-muted-foreground opacity-60 shadow-none"
+                  : "cursor-pointer bg-primary text-primary-foreground hover:opacity-90"
+              )}
             >
               <Pencil className="h-4 w-4" />
               <span>Edit Store Details</span>
@@ -534,15 +554,25 @@ export function SettingsView({
               </div>
             </div>
 
-            {/* Sign Out Button */}
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="w-full inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-destructive/30 bg-destructive/5 px-5 text-sm font-semibold text-destructive transition-colors hover:text-destructive-foreground shadow-2xs"
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Sign Out of Account</span>
-            </button>
+            {/* Go to Landing Page in Demo Mode / Sign Out in Normal Mode */}
+            {isDemo ? (
+              <Link
+                href="/"
+                className="w-full inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-5 text-sm font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground shadow-2xs"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Go to Landing Page</span>
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="w-full inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full border border-destructive/30 bg-destructive/5 px-5 text-sm font-semibold text-destructive transition-colors hover:text-destructive-foreground shadow-2xs"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Sign Out of Account</span>
+              </button>
+            )}
           </div>
 
           {/* System Diagnostics KPI Card */}

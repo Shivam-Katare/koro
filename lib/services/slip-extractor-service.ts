@@ -68,19 +68,24 @@ export async function extractSlipItemsHybrid({
         .join(", ");
 
       const systemInstruction = `You are an expert OCR and receipt parsing engine for Indian retail shopkeepers (kirana, cosmetics, general store, hardware).
-Your job is to read images of paper slips, counter parchi, handwritten bills, or printed receipts and extract the sold items with quantities and prices.
+Your job is to read images and determine if they are retail counter bills/slips, and if so, extract the sold items with quantities and prices.
 
 Known shop products: [${catalogHint}]
 
-Guidelines:
-1. Extract every distinct item sold.
-2. If an item name matches or closely resembles one of the known shop products, prioritize that catalog name.
-3. Quantity should be a positive number (default 1 if not specified).
-4. Unit price should be in rupees if legible, or null if not written.
-5. Ignore tax summaries, totals, cash tender, thank you notes, dates, and non-item lines.`;
+Rules & Guardrails:
+1. VALIDATE DOCUMENT TYPE FIRST:
+   - Check if this image is a retail store receipt, handwritten counter parchi, kirana bill, or sales slip.
+   - If the image is NOT a retail store bill (e.g. it is a medical prescription/Rx, clinic slip, personal photo, selfie, identity document, restaurant menu, school notes, or unrelated image), set "isRetailBill": false.
+   - For non-bills, provide a polite, clear explanation in "rejectionReason" (e.g., "This image appears to be a doctor's medical prescription, not a retail counter slip or store bill. Koro is designed to scan shop parchi and retail receipts.").
+2. If "isRetailBill" is true:
+   - Extract every distinct item sold into "items".
+   - If an item matches or closely resembles one of the known shop products, prioritize that catalog name.
+   - Quantity should be a positive number (default 1 if not specified).
+   - Unit price should be in rupees if legible, or null if not written.
+   - Ignore tax summaries, totals, cash tender, thank you notes, dates, and non-item lines.`;
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         contents: [
           {
             inlineData: {
@@ -89,32 +94,50 @@ Guidelines:
             },
           },
           {
-            text: "Extract all items sold on this counter bill/slip as a structured JSON list of { itemName, quantity, unitPrice }.",
+            text: "Analyze this image. Determine if it is a retail store bill/slip. If yes, extract sold items as { itemName, quantity, unitPrice }. If it is not a bill (e.g. prescription, selfie, or random doc), flag isRetailBill as false.",
           },
         ],
         config: {
           systemInstruction,
           responseMimeType: "application/json",
           responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                itemName: {
-                  type: Type.STRING,
-                  description: "Name of product or sold item",
-                },
-                quantity: {
-                  type: Type.NUMBER,
-                  description: "Quantity sold (e.g. 1, 2, 5)",
-                },
-                unitPrice: {
-                  type: Type.NUMBER,
-                  description: "Unit selling price in rupees if indicated, or null",
+            type: Type.OBJECT,
+            properties: {
+              isRetailBill: {
+                type: Type.BOOLEAN,
+                description: "True if the image is a retail store receipt, handwritten counter parchi, kirana bill, or sales slip. False if it is a medical prescription, personal photo, or non-retail document.",
+              },
+              documentType: {
+                type: Type.STRING,
+                description: "Classification: 'retail_slip', 'medical_prescription', 'id_card', 'personal_photo', 'unrelated_document'",
+              },
+              rejectionReason: {
+                type: Type.STRING,
+                description: "If isRetailBill is false, clear explanation of what was detected instead.",
+              },
+              items: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    itemName: {
+                      type: Type.STRING,
+                      description: "Name of product or sold item",
+                    },
+                    quantity: {
+                      type: Type.NUMBER,
+                      description: "Quantity sold (e.g. 1, 2, 5)",
+                    },
+                    unitPrice: {
+                      type: Type.NUMBER,
+                      description: "Unit selling price in rupees if indicated, or null",
+                    },
+                  },
+                  required: ["itemName", "quantity"],
                 },
               },
-              required: ["itemName", "quantity"],
             },
+            required: ["isRetailBill", "documentType", "items"],
           },
           temperature: 0.1,
         },
@@ -122,9 +145,25 @@ Guidelines:
 
       const jsonText = response.text?.trim();
       if (jsonText) {
-        const parsedArray = JSON.parse(jsonText);
-        if (Array.isArray(parsedArray) && parsedArray.length > 0) {
-          const lines: ExtractedSlipLine[] = parsedArray.map((raw: any) => {
+        const parsed = JSON.parse(jsonText);
+
+        // Guardrail: Non-retail document detected (e.g. Medical Prescription)
+        // DO NOT fall back to Tesseract OCR; return a helpful, polite message immediately
+        if (parsed.isRetailBill === false) {
+          const docTypeFormatted = (parsed.documentType || "document").replace(/_/g, " ");
+          return {
+            success: false,
+            method: "gemini",
+            lines: [],
+            error:
+              parsed.rejectionReason ||
+              `Detected a ${docTypeFormatted}, not a retail sales slip or counter bill. Please upload a store receipt or try our Sample Bill.`,
+          };
+        }
+
+        const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+        if (rawItems.length > 0) {
+          const lines: ExtractedSlipLine[] = rawItems.map((raw: any) => {
             const rawName = String(raw.itemName || "").trim();
             const qty = Math.max(0.1, Number(raw.quantity) || 1);
             const matched = matchItemWithCatalog(rawName, catalog);
@@ -152,6 +191,15 @@ Guidelines:
             success: true,
             method: "gemini",
             lines,
+          };
+        } else {
+          return {
+            success: false,
+            method: "gemini",
+            lines: [],
+            error:
+              parsed.rejectionReason ||
+              "Could not identify legible sold items on this slip. Please verify lighting or enter items manually.",
           };
         }
       }
